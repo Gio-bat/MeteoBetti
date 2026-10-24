@@ -49,6 +49,9 @@ mostra una località predefinita errata: chiede di cercare una città. Le richie
 meteo e cartografiche accettano solo HTTPS verso i servizi previsti, non seguono
 redirect e limitano la dimensione delle risposte e delle immagini radar.
 Il nome scelto viene salvato nelle preferenze locali del sistema.
+La mappa radar resta centrata sulla località cercata, con raggio fisso di 100 km;
+non si sposta con il mouse o con la rotella e mostra messaggi di errore leggibili
+senza esporre i codici tecnici dei servizi.
 
 Il workflow esegue anche controlli automatici su connessioni sicure, nomi salvati
 e dimensioni delle immagini prima di creare i pacchetti. Le azioni GitHub sono

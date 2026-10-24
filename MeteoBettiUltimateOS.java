@@ -57,6 +57,8 @@ import javax.net.ssl.HttpsURLConnection;
 public class MeteoBettiUltimateOS {
 
     private static final int RADAR_MAP_SIZE = 512;
+    private static final int RADAR_RADIUS_KM = 100;
+    private static final double EARTH_CIRCUMFERENCE_METERS = 40_075_016.686;
     private static final String MET_NO_USER_AGENT = "MeteoBetti/1.0 (desktop weather application)";
     private static final long MET_NO_CACHE_MILLIS = TimeUnit.MINUTES.toMillis(30);
     private static final int MAX_HTTP_RESPONSE_CHARS = 4 * 1024 * 1024;
@@ -386,8 +388,8 @@ public class MeteoBettiUltimateOS {
                 1, 1, Math.max(1, width - 3), Math.max(1, cardHeight - 2), cardRadius, cardRadius);
         Shape previousClip = g2.getClip();
         g2.clip(cardShape);
-        g2.setPaint(new GradientPaint(0, 0, new Color(255, 255, 255, 40),
-                0, cardHeight * 0.58f, new Color(255, 255, 255, 0)));
+        g2.setPaint(new GradientPaint(0, 0, new Color(255, 255, 255, 32),
+                0, cardHeight * 0.46f, new Color(255, 255, 255, 0)));
         g2.fillRect(0, 0, width, cardHeight);
         g2.setClip(previousClip);
         paintGlassOutline(g2, 0, 0, Math.max(1, width - 1), Math.max(1, cardHeight - 1), cardRadius);
@@ -395,16 +397,11 @@ public class MeteoBettiUltimateOS {
 
     private static void paintGlassOutline(Graphics2D graphics, int x, int y, int width, int height, int radius) {
         Stroke previousStroke = graphics.getStroke();
-        graphics.setColor(new Color(210, 224, 242, 20));
-        graphics.setStroke(new BasicStroke(6f));
-        graphics.drawRoundRect(x + 2, y + 2, Math.max(1, width - 4), Math.max(1, height - 4), radius, radius);
-        graphics.setColor(new Color(231, 240, 252, 36));
-        graphics.setStroke(new BasicStroke(3f));
-        graphics.drawRoundRect(x + 1, y + 1, Math.max(1, width - 2), Math.max(1, height - 2), radius, radius);
-        graphics.setPaint(new GradientPaint(x, y, new Color(255, 255, 255, 76),
-                x + width, y + height, new Color(196, 215, 239, 32)));
-        graphics.setStroke(new BasicStroke(1f));
-        graphics.drawRoundRect(x, y, width, height, radius, radius);
+        graphics.setPaint(new GradientPaint(x, y, new Color(242, 247, 255, 45),
+                x + width, y + height, new Color(196, 215, 239, 18)));
+        graphics.setStroke(new BasicStroke(0.9f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+        graphics.draw(new java.awt.geom.RoundRectangle2D.Float(
+                x + 0.5f, y + 0.5f, Math.max(1, width - 1), Math.max(1, height - 1), radius, radius));
         graphics.setStroke(previousStroke);
     }
 
@@ -1794,35 +1791,16 @@ public class MeteoBettiUltimateOS {
         private final RadarMapCanvas mapCanvas = new RadarMapCanvas();
         private final JComboBox<RadarLayer> layerSelector = new JComboBox<>(RadarLayer.values());
         private final RadarLegendPanel legendPanel = new RadarLegendPanel();
-        private double centerLatitude = Double.NaN;
-        private double centerLongitude = Double.NaN;
         private double locationLatitude = Double.NaN;
         private double locationLongitude = Double.NaN;
         private int zoomLevel = 6;
         private int requestId;
-        private final Timer navigationRefreshTimer = new Timer(280, e -> loadCurrentView());
         private Future<?> activeMapTask;
         private RadarLoadToken activeRadarRequest;
 
         RadarMapPanel() {
             setOpaque(false);
             setLayout(new BorderLayout(0, 8));
-            mapCanvas.setNavigationHandler(new RadarMapCanvas.NavigationHandler() {
-                @Override
-                public void zoom(int direction) {
-                    changeZoom(direction);
-                }
-
-                @Override
-                public void pan(int deltaX, int deltaY) {
-                    panMap(deltaX, deltaY);
-                }
-
-                @Override
-                public void panFinished(int deltaX, int deltaY) {
-                    finishPan(deltaX, deltaY);
-                }
-            });
 
             JPanel heading = new JPanel(new BorderLayout(8, 0));
             heading.setOpaque(false);
@@ -1843,7 +1821,8 @@ public class MeteoBettiUltimateOS {
 
             statusLabel.setFont(new Font("SansSerif", Font.PLAIN, 12));
             statusLabel.setForeground(new Color(46, 64, 80));
-            JLabel navigationHint = createAirDataLabel("Rotella: zoom  ·  trascina: sposta la mappa");
+            JLabel navigationHint = createAirDataLabel(
+                    "Mappa fissa · raggio " + RADAR_RADIUS_KM + " km dalla località cercata");
             navigationHint.setFont(new Font("SansSerif", Font.PLAIN, 11));
             navigationHint.setForeground(new Color(57, 75, 91));
             JPanel footer = new JPanel();
@@ -1876,12 +1855,7 @@ public class MeteoBettiUltimateOS {
                     || Math.abs(locationLongitude - longitude) > 0.0001) {
                 locationLatitude = latitude;
                 locationLongitude = longitude;
-                centerLatitude = latitude;
-                centerLongitude = longitude;
-                zoomLevel = 6;
-            } else if (Double.isNaN(centerLatitude) || Double.isNaN(centerLongitude)) {
-                centerLatitude = latitude;
-                centerLongitude = longitude;
+                zoomLevel = calculateRadarZoom(latitude, RADAR_MAP_SIZE, RADAR_RADIUS_KM);
             }
             loadCurrentView(layer);
         }
@@ -1891,11 +1865,11 @@ public class MeteoBettiUltimateOS {
         }
 
         private void loadCurrentView(RadarLayer layer) {
-            if (layer == null || !Double.isFinite(centerLatitude) || !Double.isFinite(centerLongitude)) return;
+            if (layer == null || !hasKnownStationLocation()) return;
             ForecastDateOption dateOption = (ForecastDateOption) radarDateSelector.getSelectedItem();
             String selectedDate = dateOption == null ? LocalDate.now().toString() : dateOption.date;
-            double requestLatitude = centerLatitude;
-            double requestLongitude = centerLongitude;
+            double requestLatitude = locationLatitude;
+            double requestLongitude = locationLongitude;
             int requestZoom = zoomLevel;
             double markerLatitude = locationLatitude;
             double markerLongitude = locationLongitude;
@@ -1931,7 +1905,7 @@ public class MeteoBettiUltimateOS {
                     System.err.println("Caricamento radar non riuscito: " + ex.getMessage());
                     SwingUtilities.invokeLater(() -> {
                         if (isCurrentRequest(currentRequest)) {
-                            statusLabel.setText("Radar non disponibile: " + ex.getMessage());
+                            statusLabel.setText("Radar temporaneamente non disponibile. Riprova tra poco.");
                         }
                     });
                 }
@@ -1940,35 +1914,6 @@ public class MeteoBettiUltimateOS {
                 if (currentRequest == requestId) activeMapTask = nextTask;
                 else nextTask.cancel(true);
             }
-        }
-
-        private void changeZoom(int direction) {
-            int nextZoom = Math.max(3, Math.min(10, zoomLevel + direction));
-            if (nextZoom == zoomLevel) return;
-            zoomLevel = nextZoom;
-            navigationRefreshTimer.restart();
-        }
-
-        private void panMap(int deltaX, int deltaY) {
-            mapCanvas.offsetPreview(deltaX, deltaY);
-        }
-
-        private void finishPan(int deltaX, int deltaY) {
-            if (!Double.isFinite(centerLatitude) || !Double.isFinite(centerLongitude)) return;
-            double scale = mapCanvas.getImageScale();
-            if (scale <= 0) return;
-            double worldPixels = (1 << zoomLevel) * 256.0;
-            double centerX = (centerLongitude + 180.0) / 360.0 * worldPixels;
-            double centerY = (1.0 - Math.log(Math.tan(Math.toRadians(centerLatitude))
-                    + 1.0 / Math.cos(Math.toRadians(centerLatitude))) / Math.PI) / 2.0 * worldPixels;
-            centerX -= deltaX / scale;
-            centerY -= deltaY / scale;
-            centerLongitude = centerX / worldPixels * 360.0 - 180.0;
-            centerLongitude = ((centerLongitude + 540.0) % 360.0) - 180.0;
-            double mercator = Math.PI * (1.0 - 2.0 * centerY / worldPixels);
-            centerLatitude = Math.toDegrees(Math.atan(Math.sinh(mercator)));
-            centerLatitude = Math.max(-85.0, Math.min(85.0, centerLatitude));
-            navigationRefreshTimer.restart();
         }
 
         private boolean hasKnownStationLocation() {
@@ -2082,14 +2027,20 @@ public class MeteoBettiUltimateOS {
         centerX = Math.floorMod(centerX, tilesPerAxis);
         centerY = Math.max(0, Math.min(tilesPerAxis - 1, centerY));
         double worldPixels = tilesPerAxis * 256.0;
+        double tileScale = radarTileScale(latitude, zoom, RADAR_MAP_SIZE, RADAR_RADIUS_KM);
         double centerWorldX = (longitude + 180.0) / 360.0 * worldPixels;
         double centerWorldY = (1.0 - Math.log(Math.tan(latitudeRadians)
                 + 1.0 / Math.cos(latitudeRadians)) / Math.PI) / 2.0 * worldPixels;
         double fractionX = centerWorldX - Math.floor(centerWorldX / 256.0) * 256.0;
         double fractionY = centerWorldY - Math.floor(centerWorldY / 256.0) * 256.0;
+        double halfMapWorldPixels = RADAR_MAP_SIZE / (2.0 * tileScale);
+        int firstTileOffsetX = (int) Math.floor((fractionX - halfMapWorldPixels) / 256.0);
+        int lastTileOffsetX = (int) Math.ceil((fractionX + halfMapWorldPixels) / 256.0) - 1;
+        int firstTileOffsetY = (int) Math.floor((fractionY - halfMapWorldPixels) / 256.0);
+        int lastTileOffsetY = (int) Math.ceil((fractionY + halfMapWorldPixels) / 256.0) - 1;
         java.util.List<Future<RadarTile>> tileRequests = new java.util.ArrayList<>();
-        for (int tileOffsetY = -1; tileOffsetY <= 1; tileOffsetY++) {
-            for (int tileOffsetX = -1; tileOffsetX <= 1; tileOffsetX++) {
+        for (int tileOffsetY = firstTileOffsetY; tileOffsetY <= lastTileOffsetY; tileOffsetY++) {
+            for (int tileOffsetX = firstTileOffsetX; tileOffsetX <= lastTileOffsetX; tileOffsetX++) {
                 final int dx = tileOffsetX;
                 final int dy = tileOffsetY;
                 final int tileX = Math.floorMod(centerX + dx, tilesPerAxis);
@@ -2144,14 +2095,17 @@ public class MeteoBettiUltimateOS {
                 try {
                     RadarTile tile = future.get(remaining, TimeUnit.NANOSECONDS);
                     requestToken.unregisterTileTask(future);
-                    int x = (int) Math.round(RADAR_MAP_SIZE / 2.0 + tile.offsetX * 256 - fractionX);
-                    int y = (int) Math.round(RADAR_MAP_SIZE / 2.0 + tile.offsetY * 256 - fractionY);
+                    int x = (int) Math.round(RADAR_MAP_SIZE / 2.0
+                            + (tile.offsetX * 256 - fractionX) * tileScale);
+                    int y = (int) Math.round(RADAR_MAP_SIZE / 2.0
+                            + (tile.offsetY * 256 - fractionY) * tileScale);
+                    int tileSize = (int) Math.round(256 * tileScale);
                     if (tile.baseMap != null) {
-                        g2.drawImage(tile.baseMap, x, y, null);
+                        g2.drawImage(tile.baseMap, x, y, tileSize, tileSize, null);
                         baseMapTileCount++;
                     }
                     if (tile.radar != null) {
-                        g2.drawImage(tile.radar, x, y, null);
+                        g2.drawImage(tile.radar, x, y, tileSize, tileSize, null);
                         radarTileCount++;
                     }
                 } catch (InterruptedException ex) {
@@ -2182,7 +2136,7 @@ public class MeteoBettiUltimateOS {
         if (layer != RadarLayer.PRECIPITATION) {
             throwIfRadarRequestInterrupted(requestToken);
             addModelLayer(map, latitude, longitude, centerWorldX, centerWorldY, zoom, layer,
-                    selectedDate, requestToken);
+                    selectedDate, tileScale, requestToken);
         }
         throwIfRadarRequestInterrupted(requestToken);
 
@@ -2193,8 +2147,9 @@ public class MeteoBettiUltimateOS {
         if (horizontalDelta < -worldPixels / 2) horizontalDelta += worldPixels;
         double markerWorldY = (1.0 - Math.log(Math.tan(Math.toRadians(safeMarkerLatitude))
                 + 1.0 / Math.cos(Math.toRadians(safeMarkerLatitude))) / Math.PI) / 2.0 * worldPixels;
-        int markerX = (int) Math.round(RADAR_MAP_SIZE / 2.0 + horizontalDelta);
-        int markerY = (int) Math.round(RADAR_MAP_SIZE / 2.0 + markerWorldY - centerWorldY);
+        int markerX = (int) Math.round(RADAR_MAP_SIZE / 2.0 + horizontalDelta * tileScale);
+        int markerY = (int) Math.round(RADAR_MAP_SIZE / 2.0
+                + (markerWorldY - centerWorldY) * tileScale);
         g2 = map.createGraphics();
         g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
         if (markerX >= 0 && markerX < map.getWidth() && markerY >= 0 && markerY < map.getHeight()) {
@@ -2206,16 +2161,47 @@ public class MeteoBettiUltimateOS {
         g2.dispose();
 
         String status = layer == RadarLayer.PRECIPITATION
-                ? "RainViewer live " + formatRadarTime(radarFrameTime)
-                    + " • " + radarTileCount + "/9 tile • per i giorni usa i modelli"
-                : "Open-Meteo • " + selectedDate + " alle 12:00 • modello numerico";
-        if (baseMapTileCount < 9) status += " • mappa base parziale";
+                ? "Radar live aggiornato alle " + formatRadarTime(radarFrameTime)
+                    + " · raggio " + RADAR_RADIUS_KM + " km"
+                : "Previsione " + selectedDate + " alle 12:00"
+                    + " · raggio " + RADAR_RADIUS_KM + " km";
+        if (baseMapTileCount < tileRequests.size()) {
+            System.err.println("Cartografia parziale: caricate " + baseMapTileCount
+                    + " di " + tileRequests.size() + " tile.");
+        }
         return new RadarMapResult(map, status);
+    }
+
+    static int calculateRadarZoom(double latitude, int mapSize, int radiusKm) {
+        if (!Double.isFinite(latitude) || latitude < -90 || latitude > 90
+                || mapSize < 1 || radiusKm < 1) {
+            throw new IllegalArgumentException("Dimensioni o coordinate radar non valide");
+        }
+        double clampedLatitude = Math.max(-85.05112878, Math.min(85.05112878, latitude));
+        double metersPerPixelAtZoomZero = EARTH_CIRCUMFERENCE_METERS
+                * Math.cos(Math.toRadians(clampedLatitude)) / 256.0;
+        double targetWorldPixelSpan = 2.0 * radiusKm * 1000.0
+                / metersPerPixelAtZoomZero;
+        int zoom = (int) Math.round(Math.log(mapSize / targetWorldPixelSpan) / Math.log(2.0));
+        return Math.max(3, Math.min(10, zoom));
+    }
+
+    static double radarTileScale(double latitude, int zoom, int mapSize, int radiusKm) {
+        if (!Double.isFinite(latitude) || latitude < -90 || latitude > 90
+                || zoom < 0 || zoom > 20 || mapSize < 1 || radiusKm < 1) {
+            throw new IllegalArgumentException("Dimensioni o coordinate radar non valide");
+        }
+        double clampedLatitude = Math.max(-85.05112878, Math.min(85.05112878, latitude));
+        double metersPerPixel = EARTH_CIRCUMFERENCE_METERS
+                * Math.cos(Math.toRadians(clampedLatitude)) / (256.0 * (1 << zoom));
+        double targetSpanInTilePixels = 2.0 * radiusKm * 1000.0 / metersPerPixel;
+        return mapSize / targetSpanInTilePixels;
     }
 
     private static void addModelLayer(BufferedImage map, double latitude, double longitude,
                                      double centerWorldX, double centerWorldY, int zoom, RadarLayer layer,
-                                     String selectedDate, RadarLoadToken requestToken) throws Exception {
+                                     String selectedDate, double tileScale,
+                                     RadarLoadToken requestToken) throws Exception {
         requestToken.check();
         int gridSize = 4;
         int worldTileCount = 1 << zoom;
@@ -2232,9 +2218,9 @@ public class MeteoBettiUltimateOS {
                 int y = 48 + row * 138;
                 sampleX[index] = x;
                 sampleY[index] = y;
-                double worldX = centerWorldX + x - RADAR_MAP_SIZE / 2.0;
-                double worldY = centerWorldY + y - RADAR_MAP_SIZE / 2.0;
-                double sampleLongitude = worldX / worldPixels * 360.0 - 180.0;
+                double worldX = centerWorldX + (x - RADAR_MAP_SIZE / 2.0) / tileScale;
+                double worldY = centerWorldY + (y - RADAR_MAP_SIZE / 2.0) / tileScale;
+                double sampleLongitude = ((worldX / worldPixels * 360.0 - 180.0 + 540.0) % 360.0) - 180.0;
                 double mercator = Math.PI * (1.0 - 2.0 * worldY / worldPixels);
                 double sampleLatitude = Math.toDegrees(Math.atan(Math.sinh(mercator)));
                 if (latitudes.length() > 0) {
@@ -2510,87 +2496,16 @@ public class MeteoBettiUltimateOS {
 
     private static final class RadarMapCanvas extends JPanel {
         private BufferedImage mapImage;
-        private NavigationHandler navigationHandler;
-        private Point dragOrigin;
-
-        private interface NavigationHandler {
-            void zoom(int direction);
-            void pan(int deltaX, int deltaY);
-            void panFinished(int deltaX, int deltaY);
-        }
-
-        private int dragDeltaX;
-        private int dragDeltaY;
-        private int previewOffsetX;
-        private int previewOffsetY;
 
         private RadarMapCanvas() {
             setOpaque(true);
             setDoubleBuffered(true);
             setBackground(new Color(22, 27, 34));
             setPreferredSize(new Dimension(460, 390));
-            setCursor(new Cursor(Cursor.HAND_CURSOR));
-            setToolTipText("Usa la rotella per ingrandire o ridurre e trascina per spostarti");
-            addMouseWheelListener(event -> {
-                if (navigationHandler != null) {
-                    navigationHandler.zoom(-Integer.signum(event.getWheelRotation()));
-                    event.consume();
-                }
-            });
-            addMouseListener(new MouseAdapter() {
-                @Override
-                public void mousePressed(MouseEvent event) {
-                    dragOrigin = event.getPoint();
-                    dragDeltaX = 0;
-                    dragDeltaY = 0;
-                    setCursor(new Cursor(Cursor.MOVE_CURSOR));
-                }
-
-                @Override
-                public void mouseReleased(MouseEvent event) {
-                    if (dragOrigin != null && navigationHandler != null
-                            && (dragDeltaX != 0 || dragDeltaY != 0)) {
-                        navigationHandler.panFinished(dragDeltaX, dragDeltaY);
-                    }
-                    dragOrigin = null;
-                    setCursor(new Cursor(Cursor.HAND_CURSOR));
-                }
-            });
-            addMouseMotionListener(new MouseAdapter() {
-                @Override
-                public void mouseDragged(MouseEvent event) {
-                    if (dragOrigin == null || navigationHandler == null) return;
-                    int deltaX = event.getX() - dragOrigin.x;
-                    int deltaY = event.getY() - dragOrigin.y;
-                    dragOrigin = event.getPoint();
-                    dragDeltaX += deltaX;
-                    dragDeltaY += deltaY;
-                    navigationHandler.pan(deltaX, deltaY);
-                }
-            });
-        }
-
-        private void setNavigationHandler(NavigationHandler handler) {
-            navigationHandler = handler;
-        }
-
-        private double getImageScale() {
-            int width = getWidth() - 4;
-            int height = getHeight() - 4;
-            if (width <= 0 || height <= 0) return 0;
-            return Math.min((double) width / RADAR_MAP_SIZE, (double) height / RADAR_MAP_SIZE);
-        }
-
-        private void offsetPreview(int deltaX, int deltaY) {
-            previewOffsetX += deltaX;
-            previewOffsetY += deltaY;
-            repaint();
         }
 
         private void setMapImage(BufferedImage mapImage) {
             this.mapImage = mapImage;
-            previewOffsetX = 0;
-            previewOffsetY = 0;
             repaint();
         }
 
@@ -2616,8 +2531,8 @@ public class MeteoBettiUltimateOS {
                         (double) height / mapImage.getHeight());
                 int drawWidth = (int) Math.round(mapImage.getWidth() * scale);
                 int drawHeight = (int) Math.round(mapImage.getHeight() * scale);
-                int x = (getWidth() - drawWidth) / 2 + (int) Math.round(previewOffsetX);
-                int y = (getHeight() - drawHeight) / 2 + (int) Math.round(previewOffsetY);
+                int x = (getWidth() - drawWidth) / 2;
+                int y = (getHeight() - drawHeight) / 2;
                 g2.clip(new java.awt.geom.RoundRectangle2D.Float(inset, inset, width, height, 18, 18));
                 g2.drawImage(mapImage, x, y, drawWidth, drawHeight, null);
             }
@@ -4068,18 +3983,12 @@ public class MeteoBettiUltimateOS {
             g2.fillRect(0, 0, width, height);
             g2.setClip(previousClip);
 
-            g2.setColor(new Color(230, 238, 250, 17));
-            g2.setStroke(new BasicStroke(5f));
-            g2.drawRoundRect(2, 2, width - 4, height - 4, 40, 40);
-            g2.setPaint(new GradientPaint(0, 0, new Color(242, 247, 255, 74),
-                    width, height, new Color(202, 216, 237, 27)));
-            g2.setStroke(new BasicStroke(1f));
-            g2.drawRoundRect(0, 0, width, height, 40, 40);
+            paintGlassOutline(g2, 0, 0, width, height, 40);
 
             g2.setPaint(new GradientPaint(width * 0.18f, 1,
-                    new Color(255, 255, 255, 75), width * 0.82f, 1,
+                    new Color(255, 255, 255, 38), width * 0.82f, 1,
                     new Color(255, 255, 255, 0)));
-            g2.setStroke(new BasicStroke(1.2f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+            g2.setStroke(new BasicStroke(0.8f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
             g2.drawLine((int) (width * 0.18), 1, (int) (width * 0.82), 1);
             g2.dispose();
         }

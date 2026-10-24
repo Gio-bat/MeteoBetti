@@ -11,7 +11,8 @@ public final class MeteoBettiSecurityChecks {
         verifyAllowedHostsAndHttps();
         verifyLocationNameHandling();
         verifyTileImageLimits();
-        System.out.println("Verifiche di sicurezza MeteoBetti superate.");
+        verifyFixedRadarRadius();
+        System.out.println("Verifiche MeteoBetti superate.");
     }
 
     private static void verifyAllowedHostsAndHttps() throws Exception {
@@ -73,6 +74,26 @@ public final class MeteoBettiSecurityChecks {
             throw new AssertionError("Un'immagine tile sovradimensionata deve essere rifiutata");
         } catch (IllegalArgumentException expected) {
             // Expected: remote tile dimensions are bounded before decoding.
+        }
+    }
+
+    private static void verifyFixedRadarRadius() {
+        for (double latitude : new double[]{-80, -45, 0, 45, 80}) {
+            int zoom = MeteoBettiUltimateOS.calculateRadarZoom(latitude, 512, 100);
+            double scale = MeteoBettiUltimateOS.radarTileScale(latitude, zoom, 512, 100);
+            double clampedLatitude = Math.max(-85.05112878, Math.min(85.05112878, latitude));
+            double metersPerTilePixel = 40_075_016.686
+                    * Math.cos(Math.toRadians(clampedLatitude)) / (256.0 * (1 << zoom));
+            double actualRadiusKm = 512.0 * metersPerTilePixel / scale / 2000.0;
+            check(Math.abs(actualRadiusKm - 100) < 0.01,
+                    "La mappa radar deve mantenere il raggio richiesto a ogni latitudine");
+        }
+
+        try {
+            MeteoBettiUltimateOS.calculateRadarZoom(Double.NaN, 512, 100);
+            throw new AssertionError("Coordinate radar non valide devono essere rifiutate");
+        } catch (IllegalArgumentException expected) {
+            // Expected: invalid map coordinates must never reach the tile calculation.
         }
     }
 
