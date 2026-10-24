@@ -1,0 +1,102 @@
+name: Build and publish MeteoBetti
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build ${{ matrix.platform }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macOS-arm64
+            runner: macos-14
+            script: build-macos-app.sh
+            package_suffix: macos-arm64
+            artifact: build/macos/dist/MeteoBettiUltimateOS-macos-arm64.dmg
+          - platform: macOS-x64
+            runner: macos-15-intel
+            script: build-macos-app.sh
+            package_suffix: macos-x64
+            artifact: build/macos/dist/MeteoBettiUltimateOS-macos-x64.dmg
+          - platform: Windows-x64
+            runner: windows-latest
+            script: build-windows.ps1
+            artifact: build/windows/dist/MeteoBettiUltimateOS-windows.zip
+          - platform: Linux-x64
+            runner: ubuntu-24.04
+            script: build-linux.sh
+            artifact: build/linux/dist/MeteoBettiUltimateOS-linux-x86_64.tar.gz
+
+    steps:
+      - name: Get source
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Install Java 25
+        uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
+        with:
+          distribution: temurin
+          java-version: "25"
+
+      - name: Set application version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          if [[ ! "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Use a version tag such as v1.0.0." >&2
+            exit 1
+          fi
+          echo "APP_VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+
+      - name: Run security checks
+        shell: bash
+        run: |
+          mkdir -p build/checks
+          javac -encoding UTF-8 -d build/checks MeteoBettiUltimateOS.java tests/MeteoBettiSecurityChecks.java
+          java -Djava.awt.headless=true -cp build/checks MeteoBettiSecurityChecks
+
+      - name: Build on macOS or Linux
+        if: runner.os != 'Windows'
+        env:
+          PACKAGE_SUFFIX: ${{ matrix.package_suffix }}
+        run: bash ./${{ matrix.script }}
+
+      - name: Build on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./${{ matrix.script }}
+
+      - name: Save package
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: MeteoBetti-${{ matrix.platform }}
+          path: ${{ matrix.artifact }}
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    name: Publish GitHub release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download all packages
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Create release and attach packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" release-assets/* --title "MeteoBetti $GITHUB_REF_NAME" --generate-notes
