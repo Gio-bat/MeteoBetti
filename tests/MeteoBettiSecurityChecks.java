@@ -12,7 +12,10 @@ public final class MeteoBettiSecurityChecks {
         verifyLocationNameHandling();
         verifyTileImageLimits();
         verifyFixedRadarRadius();
+        verifyForecastDateReset();
         verifyForecastAvailabilityMessages();
+        verifyWeatherFallbackErrorMessage();
+        verifySupplementalForecastMerging();
         System.out.println("Verifiche MeteoBetti superate.");
     }
 
@@ -81,6 +84,8 @@ public final class MeteoBettiSecurityChecks {
     private static void verifyFixedRadarRadius() {
         for (double latitude : new double[]{-80, -45, 0, 45, 80}) {
             int zoom = MeteoBettiUltimateOS.calculateRadarZoom(latitude, 512, 100);
+            check(zoom <= MeteoBettiUltimateOS.MAX_RADAR_TILE_ZOOM,
+                    "Il radar non deve chiedere tile oltre il livello supportato");
             double scale = MeteoBettiUltimateOS.radarTileScale(latitude, zoom, 512, 100);
             double clampedLatitude = Math.max(-85.05112878, Math.min(85.05112878, latitude));
             double metersPerTilePixel = 40_075_016.686
@@ -96,6 +101,28 @@ public final class MeteoBettiSecurityChecks {
         } catch (IllegalArgumentException expected) {
             // Expected: invalid map coordinates must never reach the tile calculation.
         }
+    }
+
+    private static void verifyForecastDateReset() {
+        var selector = new javax.swing.JComboBox<MeteoBettiUltimateOS.ForecastDateOption>();
+        String today = java.time.LocalDate.now().toString();
+        String[] firstLocationDates = {
+                today,
+                java.time.LocalDate.now().plusDays(1).toString(),
+                java.time.LocalDate.now().plusDays(2).toString()
+        };
+        MeteoBettiUltimateOS.setForecastDates(selector, firstLocationDates);
+        selector.setSelectedIndex(2);
+        check(selector.getSelectedIndex() == 2,
+                "Il test deve simulare un giorno successivo selezionato nella località precedente");
+
+        String[] newLocationDates = {
+                today,
+                java.time.LocalDate.now().plusDays(1).toString()
+        };
+        MeteoBettiUltimateOS.setForecastDates(selector, newLocationDates, true);
+        check(selector.getSelectedIndex() == 0,
+                "Una nuova località deve mostrare il primo giorno disponibile, non la selezione precedente");
     }
 
     private static void verifyForecastAvailabilityMessages() {
@@ -120,6 +147,48 @@ public final class MeteoBettiSecurityChecks {
                 "La fonte alternativa e il suo dato pioggia mancante devono essere visibili");
         check(MeteoBettiUltimateOS.weatherSourceStatus("Open-Meteo").equals("Fonte meteo: Open-Meteo"),
                 "La fonte principale deve essere mostrata");
+    }
+
+    private static void verifyWeatherFallbackErrorMessage() {
+        String message = MeteoBettiUltimateOS.weatherFallbackErrorMessage(
+                new IOException("Risposta HTTP 429\nlimite superato"),
+                new IOException("timeout\nrete non raggiungibile"));
+        check(message.contains("HTTP 429 limite superato")
+                        && message.contains("timeout rete non raggiungibile"),
+                "Se entrambe le fonti falliscono, l'errore deve spiegare il problema di ciascuna");
+    }
+
+    private static void verifySupplementalForecastMerging() {
+        String[] primaryTimes = {"2026-10-24T12:00", "2026-10-24T13:00", "2026-10-24T14:00"};
+        String[] supplementTimes = {"2026-10-24T12:00", "2026-10-24T13:00", "2026-10-24T15:00"};
+        double[] primaryValues = {12.0, Double.NaN, Double.NaN};
+        double[] supplementValues = {99.0, 13.0, 15.0};
+        double[] merged = MeteoBettiUltimateOS.mergeMissingForecastValues(
+                primaryTimes, primaryValues, supplementTimes, supplementValues);
+        check(merged[0] == 12.0,
+                "L'integrazione non deve sovrascrivere un valore già fornito dalla fonte principale");
+        check(merged[1] == 13.0,
+                "L'integrazione deve compilare i valori mancanti quando l'orario coincide");
+        check(Double.isNaN(merged[2]),
+                "L'integrazione non deve associare dati di orari differenti");
+        check(Double.isNaN(primaryValues[1]),
+                "L'integrazione non deve modificare l'array della fonte principale");
+
+        double[] aligned = MeteoBettiUltimateOS.alignForecastValues(
+                primaryTimes, new double[]{12.0, 13.0});
+        check(aligned.length == primaryTimes.length && Double.isNaN(aligned[2]),
+                "I valori omessi dalla fonte devono essere rappresentati come non disponibili");
+
+        String status = MeteoBettiUltimateOS.weatherSourceStatus(
+                "Open-Meteo + MET Norway", java.util.Set.of("UV", "vento"), false, true);
+        check(status.contains("Open-Meteo") && status.contains("MET Norway")
+                        && status.contains("UV") && status.contains("vento")
+                        && status.contains("probabilità pioggia N/D"),
+                "L'interfaccia deve indicare le fonti, i campi integrati e la pioggia non disponibile");
+        check(MeteoBettiUltimateOS.weatherSourceStatus(
+                        "Open-Meteo", java.util.Set.of(), true)
+                        .contains("integrazione MET Norway non disponibile"),
+                "L'interfaccia deve segnalare se la fonte integrativa non risponde");
     }
 
     private static void expectRejected(String endpoint) throws Exception {

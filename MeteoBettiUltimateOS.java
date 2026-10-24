@@ -34,6 +34,7 @@ import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Iterator;
@@ -58,6 +59,7 @@ public class MeteoBettiUltimateOS {
 
     private static final int RADAR_MAP_SIZE = 512;
     private static final int RADAR_RADIUS_KM = 100;
+    static final int MAX_RADAR_TILE_ZOOM = 7;
     private static final double EARTH_CIRCUMFERENCE_METERS = 40_075_016.686;
     private static final String MET_NO_USER_AGENT = "MeteoBetti/1.0 (desktop weather application)";
     private static final long MET_NO_CACHE_MILLIS = TimeUnit.MINUTES.toMillis(30);
@@ -148,6 +150,7 @@ public class MeteoBettiUltimateOS {
     protected static double stationNo2 = Double.NaN;
     protected static double stationOzone = Double.NaN;
     private static volatile String weatherDataSourceName = "Open-Meteo";
+    private static volatile String weatherSourceStatusText = "Fonte meteo: in attesa dei dati";
 
     public static void main(String[] args) {
         customUserName = loadUserName();
@@ -378,7 +381,7 @@ public class MeteoBettiUltimateOS {
         g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
         int cardHeight = Math.max(1, height - 4);
         int cardRadius = radius + 8;
-        g2.setColor(new Color(0, 0, 0, 72));
+        g2.setColor(new Color(0, 0, 0, 52));
         g2.fillRoundRect(3, 6, Math.max(1, width - 6), Math.max(1, height - 8),
                 cardRadius, cardRadius);
         g2.setPaint(new GradientPaint(0, 0, new Color(83, 89, 100, 151),
@@ -393,14 +396,13 @@ public class MeteoBettiUltimateOS {
                 0, cardHeight * 0.46f, new Color(255, 255, 255, 0)));
         g2.fillRect(0, 0, width, cardHeight);
         g2.setClip(previousClip);
-        paintGlassOutline(g2, 0, 0, Math.max(1, width - 1), Math.max(1, cardHeight - 1), cardRadius);
     }
 
     private static void paintGlassOutline(Graphics2D graphics, int x, int y, int width, int height, int radius) {
         Stroke previousStroke = graphics.getStroke();
-        graphics.setPaint(new GradientPaint(x, y, new Color(242, 247, 255, 45),
-                x + width, y + height, new Color(196, 215, 239, 18)));
-        graphics.setStroke(new BasicStroke(0.9f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+        graphics.setPaint(new GradientPaint(x, y, new Color(242, 247, 255, 24),
+                x + width, y + height, new Color(196, 215, 239, 9)));
+        graphics.setStroke(new BasicStroke(0.7f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
         graphics.draw(new java.awt.geom.RoundRectangle2D.Float(
                 x + 0.5f, y + 0.5f, Math.max(1, width - 1), Math.max(1, height - 1), radius, radius));
         graphics.setStroke(previousStroke);
@@ -658,6 +660,8 @@ public class MeteoBettiUltimateOS {
                 String countryText = stationCountry == null || stationCountry.isBlank()
                         ? "non disponibile" : stationCountry;
                 String locationText = escapeHtml(stationCity) + ", " + escapeHtml(countryText);
+                String temperatureText = Double.isFinite(stationTemp)
+                        ? String.format(Locale.ITALIAN, "%.1f °C", stationTemp) : "non disponibile";
                 String uvText = Double.isFinite(stationUvIndex)
                         ? String.format(Locale.ITALIAN, "%.1f UV", stationUvIndex) : "non disponibile";
                 String apparentText = Double.isFinite(stationApparentTemp)
@@ -672,16 +676,16 @@ public class MeteoBettiUltimateOS {
                     "<html><body style='color:#e6eaf0; font-family:sans-serif; width:300px;'>" +
                     "<p style='font-size:16px; color:#ffffff;'><b>" + locationText + "</b></p>" +
                     "<p style='color:#aeb7c3;'>Condizioni attuali</p>" +
-                    "<p><b>Temperatura:</b> " + String.format(Locale.ITALIAN, "%.1f °C", stationTemp) + "</p>" +
+                    "<p><b>Temperatura:</b> " + escapeHtml(temperatureText) + "</p>" +
                     "<p><b>Percepita:</b> " + escapeHtml(apparentText) + "</p>" +
                     "<p><b>Umidità:</b> " + escapeHtml(humidityText) + "</p>" +
                     "<p><b>Pressione:</b> " + escapeHtml(pressureText) + "</p>" +
                     "<p><b>Vento:</b> " + escapeHtml(windText) + "</p>" +
                     "<p><b>Indice UV massimo previsto oggi:</b> " +
                     escapeHtml(uvText) + "</p>" +
-                    "<p style='color:#aeb7c3; font-size:11px;'>Fonte meteo: "
-                            + escapeHtml(weatherDataSourceName)
-                            + (weatherDataSourceName.equals("MET Norway")
+                    "<p style='color:#aeb7c3; font-size:11px;'>"
+                            + escapeHtml(weatherSourceStatusText)
+                            + (weatherDataSourceName.contains("MET Norway")
                             ? " · MET Norway (https://api.met.no/) · CC BY 4.0 " +
                             "(https://creativecommons.org/licenses/by/4.0/)" : "")
                             + "</p>" +
@@ -1508,7 +1512,12 @@ public class MeteoBettiUltimateOS {
         return selector;
     }
 
-    private static void setForecastDates(JComboBox<ForecastDateOption> selector, String[] dates) {
+    static void setForecastDates(JComboBox<ForecastDateOption> selector, String[] dates) {
+        setForecastDates(selector, dates, false);
+    }
+
+    static void setForecastDates(JComboBox<ForecastDateOption> selector, String[] dates,
+                                 boolean selectFirstDate) {
         if (selector == null) return;
         ForecastDateOption current = (ForecastDateOption) selector.getSelectedItem();
         String selectedDate = current == null ? LocalDate.now().toString() : current.date;
@@ -1523,7 +1532,7 @@ public class MeteoBettiUltimateOS {
                 if (option.date.equals(selectedDate)) selectedDateAvailable = true;
             }
             if (selector.getItemCount() > 0) {
-                if (selectedDateAvailable) {
+                if (!selectFirstDate && selectedDateAvailable) {
                     for (int i = 0; i < selector.getItemCount(); i++) {
                         if (selector.getItemAt(i).date.equals(selectedDate)) {
                             selector.setSelectedIndex(i);
@@ -1547,7 +1556,7 @@ public class MeteoBettiUltimateOS {
         return dates.toArray(new String[0]);
     }
 
-    private static final class ForecastDateOption {
+    static final class ForecastDateOption {
         private final String date;
 
         private ForecastDateOption(String date) {
@@ -2120,13 +2129,18 @@ public class MeteoBettiUltimateOS {
                             + (tile.offsetX * 256 - fractionX) * tileScale);
                     int y = (int) Math.round(RADAR_MAP_SIZE / 2.0
                             + (tile.offsetY * 256 - fractionY) * tileScale);
-                    int tileSize = (int) Math.round(256 * tileScale);
+                    int right = (int) Math.round(RADAR_MAP_SIZE / 2.0
+                            + ((tile.offsetX + 1) * 256 - fractionX) * tileScale);
+                    int bottom = (int) Math.round(RADAR_MAP_SIZE / 2.0
+                            + ((tile.offsetY + 1) * 256 - fractionY) * tileScale);
+                    int tileWidth = Math.max(1, right - x + 1);
+                    int tileHeight = Math.max(1, bottom - y + 1);
                     if (tile.baseMap != null) {
-                        g2.drawImage(tile.baseMap, x, y, tileSize, tileSize, null);
+                        g2.drawImage(tile.baseMap, x, y, tileWidth, tileHeight, null);
                         baseMapTileCount++;
                     }
                     if (tile.radar != null) {
-                        g2.drawImage(tile.radar, x, y, tileSize, tileSize, null);
+                        g2.drawImage(tile.radar, x, y, tileWidth, tileHeight, null);
                         radarTileCount++;
                     }
                 } catch (InterruptedException ex) {
@@ -2204,7 +2218,7 @@ public class MeteoBettiUltimateOS {
         double targetWorldPixelSpan = 2.0 * radiusKm * 1000.0
                 / metersPerPixelAtZoomZero;
         int zoom = (int) Math.round(Math.log(mapSize / targetWorldPixelSpan) / Math.log(2.0));
-        return Math.max(3, Math.min(10, zoom));
+        return Math.max(3, Math.min(MAX_RADAR_TILE_ZOOM, zoom));
     }
 
     static double radarTileScale(double latitude, int zoom, int mapSize, int radiusKm) {
@@ -2691,7 +2705,8 @@ public class MeteoBettiUltimateOS {
             }
 
             SwingUtilities.invokeLater(() ->
-                    mainLocationDisplayLabel.setText("Posizione non disponibile: cerca una città."));
+                    mainLocationDisplayLabel.setText(
+                            "Posizione non disponibile · controlla i permessi di localizzazione o cerca una città."));
         }).start();
     }
 
@@ -2728,36 +2743,44 @@ public class MeteoBettiUltimateOS {
             throw new IllegalStateException("Helper di localizzazione assente: " + helper);
         }
 
-        Process process = new ProcessBuilder(helper.toString()).start();
-        if (!process.waitFor(35, TimeUnit.SECONDS)) {
-            process.destroyForcibly();
-            throw new IllegalStateException("Richiesta di posizione scaduta");
-        }
+        Path responseFile = java.nio.file.Files.createTempFile("meteobetti-location-", ".txt",
+                java.nio.file.attribute.PosixFilePermissions.asFileAttribute(
+                        java.nio.file.attribute.PosixFilePermissions.fromString("rw-------")));
+        try {
+            Process process = new ProcessBuilder("/usr/bin/open", "-n", "-W",
+                    appBundle.resolve("Contents/Helpers/LocationAgent.app").toString(),
+                    "--args", responseFile.toString()).start();
+            if (!process.waitFor(45, TimeUnit.SECONDS)) {
+                process.destroyForcibly();
+                throw new IllegalStateException("Richiesta di posizione scaduta");
+            }
+            if (process.exitValue() != 0) {
+                String launcherError = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8)
+                        .trim();
+                throw new IllegalStateException(launcherError.isEmpty()
+                        ? "Impossibile avviare il servizio di localizzazione macOS" : launcherError);
+            }
+            String response = java.nio.file.Files.readString(responseFile, StandardCharsets.UTF_8).trim();
+            if (response.startsWith("ERROR|")) {
+                throw new IllegalStateException(response.substring("ERROR|".length()));
+            }
+            if (!response.startsWith("OK|")) {
+                throw new IllegalStateException("Il servizio di localizzazione macOS non ha restituito dati");
+            }
+            String output = response.substring("OK|".length());
+            String[] values = output.split("\\|", 4);
+            if (values.length < 2) {
+                throw new IllegalStateException("Risposta non valida dall'helper di localizzazione");
+            }
 
-        String output;
-        String errorOutput;
-        try (BufferedReader stdout = new BufferedReader(new InputStreamReader(process.getInputStream()));
-             BufferedReader stderr = new BufferedReader(new InputStreamReader(process.getErrorStream()))) {
-            output = stdout.readLine();
-            errorOutput = stderr.readLine();
+            double latitude = Double.parseDouble(values[0]);
+            double longitude = Double.parseDouble(values[1]);
+            String city = values.length > 2 ? values[2] : "";
+            String country = values.length > 3 ? values[3] : "";
+            return new LocationFix(latitude, longitude, city, country);
+        } finally {
+            java.nio.file.Files.deleteIfExists(responseFile);
         }
-
-        if (process.exitValue() != 0 || output == null) {
-            throw new IllegalStateException(errorOutput == null
-                    ? "Autorizzazione negata o posizione non disponibile"
-                    : errorOutput);
-        }
-
-        String[] values = output.split("\\|", 4);
-        if (values.length < 2) {
-            throw new IllegalStateException("Risposta non valida dall'helper di localizzazione");
-        }
-
-        double latitude = Double.parseDouble(values[0]);
-        double longitude = Double.parseDouble(values[1]);
-        String city = values.length > 2 ? values[2] : "";
-        String country = values.length > 3 ? values[3] : "";
-        return new LocationFix(latitude, longitude, city, country);
     }
 
     private static LocationFix readWindowsLocation() throws Exception {
@@ -2979,6 +3002,7 @@ public class MeteoBettiUltimateOS {
             }
             if (weatherSourceLabel != null) {
                 weatherSourceLabel.setText("Fonte meteo: dati non disponibili");
+                weatherSourceStatusText = "Fonte meteo: dati non disponibili";
             }
             JOptionPane.showMessageDialog(parentFrame,
                     message + "\n" + finalDetails, "Errore di Rete", JOptionPane.ERROR_MESSAGE);
@@ -3001,9 +3025,13 @@ public class MeteoBettiUltimateOS {
         try {
             weatherJson = executeHttpGET(weatherUrl);
         } catch (Exception primaryError) {
-            if (!isHttpRateLimit(primaryError)) throw primaryError;
-            System.err.println("Limite Open-Meteo raggiunto; uso MET Norway come fonte alternativa.");
-            weatherJson = fetchMetNorwayForecast(lat, lon);
+            System.err.println("Open-Meteo non disponibile; provo MET Norway: " + primaryError.getMessage());
+            try {
+                weatherJson = fetchMetNorwayForecast(lat, lon, ZoneId.systemDefault());
+            } catch (Exception fallbackError) {
+                throw new java.io.IOException(
+                        weatherFallbackErrorMessage(primaryError, fallbackError), fallbackError);
+            }
             dataSource = "MET Norway";
         }
 
@@ -3015,22 +3043,106 @@ public class MeteoBettiUltimateOS {
         double hum = parseOptionalJsonNumber(currentBlock, "\"relative_humidity_2m\":");
         double press = parseOptionalJsonNumber(currentBlock, "\"surface_pressure\":");
         double rawWind = parseOptionalJsonNumber(currentBlock, "\"wind_speed_10m\":");
-        int wCode = (int) parseOptionalJsonNumber(currentBlock, "\"weather_code\":");
-        double[] uvValues = dailyBlock.isEmpty()
-                ? new double[0] : parseNullableJsonDoubleArray(dailyBlock, "\"uv_index_max\":[");
-        double uvMax = uvValues.length == 0 ? Double.NaN : uvValues[0];
+        double rawWeatherCode = parseOptionalJsonNumber(currentBlock, "\"weather_code\":");
         String hourlyBlock = weatherJson.substring(weatherJson.indexOf("\"hourly\":"));
         String[] hourlyTimes = parseJsonStringArray(hourlyBlock, "\"time\":[");
-        double[] hourlyTemps = parseJsonDoubleArray(hourlyBlock, "\"temperature_2m\":[");
-        double[] hourlyCodes = parseJsonDoubleArray(hourlyBlock, "\"weather_code\":[");
-        double[] hourlyWinds = parseJsonDoubleArray(hourlyBlock, "\"wind_speed_10m\":[");
-        double[] hourlyPrecipitation = parseNullableJsonDoubleArray(hourlyBlock, "\"precipitation_probability\":[");
+        double[] hourlyTemps = parseForecastValues(hourlyBlock, "\"temperature_2m\":[", hourlyTimes);
+        double[] hourlyCodes = parseForecastValues(hourlyBlock, "\"weather_code\":[", hourlyTimes);
+        double[] hourlyWinds = parseForecastValues(hourlyBlock, "\"wind_speed_10m\":[", hourlyTimes);
+        double[] hourlyPrecipitation = parseForecastValues(
+                hourlyBlock, "\"precipitation_probability\":[", hourlyTimes);
         String[] dailyTimes = parseJsonStringArray(dailyBlock, "\"time\":[");
-        double[] dailyMeanTemps = parseNullableJsonDoubleArray(dailyBlock, "\"temperature_2m_mean\":[");
-        double[] dailyPrecipitation = parseNullableJsonDoubleArray(dailyBlock, "\"precipitation_probability_max\":[");
-        double[] dailyMeanWinds = parseNullableJsonDoubleArray(dailyBlock, "\"wind_speed_10m_mean\":[");
-        double[] dailyUvIndices = parseNullableJsonDoubleArray(dailyBlock, "\"uv_index_max\":[");
-        double[] dailyCodes = parseNullableJsonDoubleArray(dailyBlock, "\"weather_code\":[");
+        double[] dailyMeanTemps = parseForecastValues(dailyBlock, "\"temperature_2m_mean\":[", dailyTimes);
+        double[] dailyPrecipitation = parseForecastValues(
+                dailyBlock, "\"precipitation_probability_max\":[", dailyTimes);
+        double[] dailyMeanWinds = parseForecastValues(dailyBlock, "\"wind_speed_10m_mean\":[", dailyTimes);
+        double[] dailyUvIndices = parseForecastValues(dailyBlock, "\"uv_index_max\":[", dailyTimes);
+        double[] dailyCodes = parseForecastValues(dailyBlock, "\"weather_code\":[", dailyTimes);
+        double uvMax = dailyUvIndices.length == 0 ? Double.NaN : dailyUvIndices[0];
+
+        LinkedHashSet<String> integratedFields = new LinkedHashSet<>();
+        boolean supplementUnavailable = false;
+        if ("Open-Meteo".equals(dataSource) && hasMissingSupplementableValues(
+                t, hum, press, rawWind, rawWeatherCode, hourlyTemps, hourlyCodes, hourlyWinds,
+                dailyMeanTemps, dailyMeanWinds, dailyUvIndices, dailyCodes)) {
+            try {
+                String primaryTimezone = parseJsonString(weatherJson, "timezone");
+                ZoneId forecastZone = primaryTimezone.isBlank()
+                        ? ZoneId.systemDefault() : ZoneId.of(primaryTimezone);
+                String supplementJson = fetchMetNorwayForecast(lat, lon, forecastZone);
+                String supplementCurrent = supplementJson.substring(supplementJson.indexOf("\"current\":"));
+                String supplementHourly = supplementJson.substring(supplementJson.indexOf("\"hourly\":"));
+                String supplementDaily = supplementJson.substring(supplementJson.indexOf("\"daily\":"));
+                String[] supplementHourlyTimes = parseJsonStringArray(supplementHourly, "\"time\":[");
+                String[] supplementDailyTimes = parseJsonStringArray(supplementDaily, "\"time\":[");
+
+                double fallback = parseOptionalJsonNumber(supplementCurrent, "\"temperature_2m\":");
+                if (!Double.isFinite(t) && Double.isFinite(fallback)) {
+                    t = fallback;
+                    integratedFields.add("temperatura");
+                }
+                fallback = parseOptionalJsonNumber(supplementCurrent, "\"relative_humidity_2m\":");
+                if (!Double.isFinite(hum) && Double.isFinite(fallback)) {
+                    hum = fallback;
+                    integratedFields.add("umidità");
+                }
+                fallback = parseOptionalJsonNumber(supplementCurrent, "\"surface_pressure\":");
+                if (!Double.isFinite(press) && Double.isFinite(fallback)) {
+                    press = fallback;
+                    integratedFields.add("pressione");
+                }
+                fallback = parseOptionalJsonNumber(supplementCurrent, "\"wind_speed_10m\":");
+                if (!Double.isFinite(rawWind) && Double.isFinite(fallback)) {
+                    rawWind = fallback;
+                    integratedFields.add("vento");
+                }
+                fallback = parseOptionalJsonNumber(supplementCurrent, "\"weather_code\":");
+                if (!Double.isFinite(rawWeatherCode) && Double.isFinite(fallback)) {
+                    rawWeatherCode = fallback;
+                    integratedFields.add("condizioni");
+                }
+
+                double[] before = hourlyTemps;
+                hourlyTemps = mergeMissingForecastValues(hourlyTimes, hourlyTemps, supplementHourlyTimes,
+                        parseNullableJsonDoubleArray(supplementHourly, "\"temperature_2m\":["));
+                if (countFiniteValues(hourlyTemps) > countFiniteValues(before)) integratedFields.add("temperatura");
+                before = hourlyCodes;
+                hourlyCodes = mergeMissingForecastValues(hourlyTimes, hourlyCodes, supplementHourlyTimes,
+                        parseNullableJsonDoubleArray(supplementHourly, "\"weather_code\":["));
+                if (countFiniteValues(hourlyCodes) > countFiniteValues(before)) integratedFields.add("condizioni");
+                before = hourlyWinds;
+                hourlyWinds = mergeMissingForecastValues(hourlyTimes, hourlyWinds, supplementHourlyTimes,
+                        parseNullableJsonDoubleArray(supplementHourly, "\"wind_speed_10m\":["));
+                if (countFiniteValues(hourlyWinds) > countFiniteValues(before)) integratedFields.add("vento");
+
+                before = dailyMeanTemps;
+                dailyMeanTemps = mergeMissingForecastValues(dailyTimes, dailyMeanTemps, supplementDailyTimes,
+                        parseNullableJsonDoubleArray(supplementDaily, "\"temperature_2m_mean\":["));
+                if (countFiniteValues(dailyMeanTemps) > countFiniteValues(before)) integratedFields.add("temperatura");
+                before = dailyMeanWinds;
+                dailyMeanWinds = mergeMissingForecastValues(dailyTimes, dailyMeanWinds, supplementDailyTimes,
+                        parseNullableJsonDoubleArray(supplementDaily, "\"wind_speed_10m_mean\":["));
+                if (countFiniteValues(dailyMeanWinds) > countFiniteValues(before)) integratedFields.add("vento");
+                before = dailyUvIndices;
+                dailyUvIndices = mergeMissingForecastValues(dailyTimes, dailyUvIndices, supplementDailyTimes,
+                        parseNullableJsonDoubleArray(supplementDaily, "\"uv_index_max\":["));
+                if (countFiniteValues(dailyUvIndices) > countFiniteValues(before)) integratedFields.add("UV");
+                before = dailyCodes;
+                dailyCodes = mergeMissingForecastValues(dailyTimes, dailyCodes, supplementDailyTimes,
+                        parseNullableJsonDoubleArray(supplementDaily, "\"weather_code\":["));
+                if (countFiniteValues(dailyCodes) > countFiniteValues(before)) integratedFields.add("condizioni");
+
+            } catch (Exception supplementError) {
+                supplementUnavailable = true;
+                System.err.println("Integrazione dei dati mancanti da MET Norway non riuscita: "
+                        + supplementError.getMessage());
+            }
+        }
+        uvMax = dailyUvIndices.length == 0 ? Double.NaN : dailyUvIndices[0];
+        if ("Open-Meteo".equals(dataSource) && !integratedFields.isEmpty()) {
+            dataSource = "Open-Meteo + MET Norway";
+        }
+        int wCode = Double.isFinite(rawWeatherCode) ? (int) rawWeatherCode : -1;
         int forecastStart = 0;
         String currentTime = parseJsonString(currentBlock, "time");
         while (forecastStart < hourlyTimes.length && hourlyTimes[forecastStart].compareTo(currentTime) < 0) {
@@ -3066,7 +3178,7 @@ public class MeteoBettiUltimateOS {
                 if (!hourlyTimes[i].startsWith(dailyTimes[day])) continue;
                 dayTimes[hour] = hourlyTimes[i];
                 dayTemps[hour] = hourlyTemps[i];
-                dayCodes[hour] = hourlyCodes[i];
+                dayCodes[hour] = Double.isFinite(hourlyCodes[i]) ? hourlyCodes[i] : -1;
                 dayPrecipitation[hour] = hourlyPrecipitation[i];
                 dayWinds[hour] = hourlyWinds[i];
                 hour++;
@@ -3081,9 +3193,12 @@ public class MeteoBettiUltimateOS {
             int hourIndex = forecastStart + i;
             forecastRows[i] = new Object[]{
                     hourlyTimes[hourIndex].substring(11, 16),
-                    resolveEmoji((int) hourlyCodes[hourIndex]),
-                    Math.round(hourlyTemps[hourIndex]) + "°C",
-                    Math.round(hourlyWinds[hourIndex]) + " km/h"
+                    resolveEmoji(Double.isFinite(hourlyCodes[hourIndex])
+                            ? (int) hourlyCodes[hourIndex] : -1),
+                    Double.isFinite(hourlyTemps[hourIndex])
+                            ? Math.round(hourlyTemps[hourIndex]) + "°C" : "N/D",
+                    Double.isFinite(hourlyWinds[hourIndex])
+                            ? Math.round(hourlyWinds[hourIndex]) + " km/h" : "N/D"
             };
         }
         stationCity = name;
@@ -3097,7 +3212,16 @@ public class MeteoBettiUltimateOS {
         stationWindSpeed = rawWind;
         stationUvIndex = uvMax;
         final String selectedDataSource = dataSource;
+        final String selectedSourceStatus = weatherSourceStatus(
+                selectedDataSource, integratedFields, supplementUnavailable,
+                hasMissingValues(hourlyPrecipitation) || hasMissingValues(dailyPrecipitation));
         weatherDataSourceName = selectedDataSource;
+        weatherSourceStatusText = selectedSourceStatus;
+        final double selectedTemperature = t;
+        final double selectedApparentTemperature = appT;
+        final double selectedHumidity = hum;
+        final double selectedPressure = press;
+        final double selectedUvMax = uvMax;
 
         String desc = resolveDescription(wCode);
         String ico = resolveEmoji(wCode);
@@ -3106,21 +3230,28 @@ public class MeteoBettiUltimateOS {
         SwingUtilities.invokeLater(() -> {
             mainLocationDisplayLabel.setText(country.isEmpty() ? name : name + ", " + country);
             if (weatherSourceLabel != null) {
-                weatherSourceLabel.setText(weatherSourceStatus(selectedDataSource));
+                weatherSourceLabel.setText("<html><div style='width:320px;text-align:center;'>"
+                        + escapeHtml(selectedSourceStatus) + "</div></html>");
             }
-            mainTempDisplayLabel.setText(Math.round(t) + "°");
+            mainTempDisplayLabel.setText(Double.isFinite(selectedTemperature)
+                    ? Math.round(selectedTemperature) + "°" : "N/D");
             if (heroIconLabel != null) heroIconLabel.setText(ico);
             conditionTextLabel.setText(desc + "  ·  percepita "
-                    + (Double.isFinite(appT) ? Math.round(appT) + "°" : "N/D"));
+                    + (Double.isFinite(selectedApparentTemperature)
+                    ? Math.round(selectedApparentTemperature) + "°" : "N/D"));
 
-            humidityMetricBox.updateGaugeData(Double.isFinite(hum) ? Math.round(hum) + "%" : "N/D",
-                    Double.isFinite(hum) ? (int) Math.max(0, Math.min(100, Math.round(hum))) : 0);
-            uvMetricBox.updateGaugeData(Double.isFinite(uvMax)
-                            ? String.format(Locale.ITALIAN, "%.1f UV", uvMax) : "N/D",
-                    Double.isFinite(uvMax)
-                            ? (int) Math.min(100, Math.max(0, Math.round(uvMax / 11.0 * 100))) : 0);
-            pressureMetricBox.updateGaugeData(Double.isFinite(press) ? Math.round(press) + " hPa" : "N/D",
-                    Double.isFinite(press) ? (int) Math.min(100, Math.max(0, (press - 980) * 2)) : 0);
+            humidityMetricBox.updateGaugeData(Double.isFinite(selectedHumidity)
+                            ? Math.round(selectedHumidity) + "%" : "N/D",
+                    Double.isFinite(selectedHumidity)
+                            ? (int) Math.max(0, Math.min(100, Math.round(selectedHumidity))) : 0);
+            uvMetricBox.updateGaugeData(Double.isFinite(selectedUvMax)
+                            ? String.format(Locale.ITALIAN, "%.1f UV", selectedUvMax) : "N/D",
+                    Double.isFinite(selectedUvMax)
+                            ? (int) Math.min(100, Math.max(0, Math.round(selectedUvMax / 11.0 * 100))) : 0);
+            pressureMetricBox.updateGaugeData(Double.isFinite(selectedPressure)
+                            ? Math.round(selectedPressure) + " hPa" : "N/D",
+                    Double.isFinite(selectedPressure)
+                            ? (int) Math.min(100, Math.max(0, (selectedPressure - 980) * 2)) : 0);
             airQualityMetricBox.updateGaugeData("N/D", 0);
 
             forecastTableModel.setRowCount(0);
@@ -3136,7 +3267,11 @@ public class MeteoBettiUltimateOS {
             if (analyticsForecastPanel != null) {
                 analyticsForecastPanel.updateForecasts(dailyForecasts);
             }
-            setForecastDates(radarDateSelector, dailyTimes);
+            setForecastDates(radarDateSelector, dailyTimes, true);
+            if (appNavBar != null) appNavBar.select("DASHBOARD");
+            else if (pageCardLayout != null && mainCardContainer != null) {
+                pageCardLayout.show(mainCardContainer, "DASHBOARD");
+            }
 
             refreshRadarMap(lat, lon);
             fetchAirQuality(lat, lon);
@@ -3149,24 +3284,124 @@ public class MeteoBettiUltimateOS {
     }
 
     static String weatherSourceStatus(String dataSource) {
+        return weatherSourceStatus(dataSource, Set.of(), false, false);
+    }
+
+    static String weatherSourceStatus(String dataSource, Set<String> integratedFields,
+                                      boolean supplementUnavailable) {
+        return weatherSourceStatus(dataSource, integratedFields, supplementUnavailable, false);
+    }
+
+    static String weatherSourceStatus(String dataSource, Set<String> integratedFields,
+                                      boolean supplementUnavailable, boolean precipitationUnavailable) {
         if ("MET Norway".equals(dataSource)) {
             return "Fonte meteo: MET Norway · probabilità pioggia non disponibile";
         }
-        return "Fonte meteo: " + (dataSource == null || dataSource.isBlank()
+        String status = "Fonte meteo: " + (dataSource == null || dataSource.isBlank()
                 ? "non disponibile" : dataSource);
+        if (integratedFields != null && !integratedFields.isEmpty()) {
+            status += " · dati integrati da MET Norway: " + String.join(", ", integratedFields);
+        }
+        if (supplementUnavailable) {
+            status += integratedFields != null && !integratedFields.isEmpty()
+                    ? " · integrazione MET Norway incompleta"
+                    : " · integrazione MET Norway non disponibile";
+        }
+        if ("Open-Meteo + MET Norway".equals(dataSource) && precipitationUnavailable) {
+            status += " · probabilità pioggia N/D (MET Norway non la fornisce)";
+        }
+        return status;
     }
 
-    private static boolean isHttpRateLimit(Exception error) {
-        for (Throwable cause = error; cause != null; cause = cause.getCause()) {
-            if (cause.getMessage() != null && cause.getMessage().contains("HTTP 429")) return true;
+    private static double[] parseForecastValues(String jsonBlock, String key, String[] times) {
+        int valuesStart = jsonBlock.indexOf(key);
+        if (valuesStart < 0) {
+            double[] missingValues = new double[times.length];
+            Arrays.fill(missingValues, Double.NaN);
+            return missingValues;
+        }
+        return alignForecastValues(times, parseNullableJsonDoubleArray(jsonBlock, key));
+    }
+
+    static double[] alignForecastValues(String[] times, double[] values) {
+        if (values.length > times.length) {
+            throw new IllegalArgumentException("La risposta contiene più valori che orari di previsione");
+        }
+        if (values.length == times.length) return values;
+        double[] alignedValues = new double[times.length];
+        Arrays.fill(alignedValues, Double.NaN);
+        System.arraycopy(values, 0, alignedValues, 0, values.length);
+        return alignedValues;
+    }
+
+    static double[] mergeMissingForecastValues(String[] primaryTimes, double[] primaryValues,
+                                               String[] supplementTimes, double[] supplementValues) {
+        if (primaryTimes.length != primaryValues.length
+                || supplementTimes.length != supplementValues.length) {
+            throw new IllegalArgumentException("Orari e valori delle previsioni non corrispondono");
+        }
+        Map<String, Double> supplementByTime = new LinkedHashMap<>();
+        for (int i = 0; i < supplementTimes.length; i++) {
+            if (Double.isFinite(supplementValues[i])) {
+                supplementByTime.put(supplementTimes[i], supplementValues[i]);
+            }
+        }
+        double[] merged = primaryValues.clone();
+        for (int i = 0; i < primaryTimes.length; i++) {
+            if (!Double.isFinite(merged[i])) {
+                Double replacement = supplementByTime.get(primaryTimes[i]);
+                if (replacement != null) merged[i] = replacement;
+            }
+        }
+        return merged;
+    }
+
+    private static boolean hasMissingSupplementableValues(double temperature, double humidity,
+                                                           double pressure, double wind,
+                                                           double weatherCode, double[] hourlyTemps,
+                                                           double[] hourlyCodes, double[] hourlyWinds,
+                                                           double[] dailyTemps, double[] dailyWinds,
+                                                           double[] dailyUv, double[] dailyCodes) {
+        return !Double.isFinite(temperature) || !Double.isFinite(humidity)
+                || !Double.isFinite(pressure) || !Double.isFinite(wind)
+                || !Double.isFinite(weatherCode) || hasMissingValues(hourlyTemps)
+                || hasMissingValues(hourlyCodes) || hasMissingValues(hourlyWinds)
+                || hasMissingValues(dailyTemps) || hasMissingValues(dailyWinds)
+                || hasMissingValues(dailyUv) || hasMissingValues(dailyCodes);
+    }
+
+    private static boolean hasMissingValues(double[] values) {
+        for (double value : values) {
+            if (!Double.isFinite(value)) return true;
         }
         return false;
     }
 
-    private static String fetchMetNorwayForecast(double latitude, double longitude) throws Exception {
+    private static int countFiniteValues(double[] values) {
+        int count = 0;
+        for (double value : values) {
+            if (Double.isFinite(value)) count++;
+        }
+        return count;
+    }
+
+    private static String conciseErrorMessage(Exception error) {
+        String message = error.getMessage();
+        if (message == null || message.isBlank()) message = error.getClass().getSimpleName();
+        message = message.replaceAll("[\\r\\n\\t]+", " ").trim();
+        return message.length() > 120 ? message.substring(0, 117) + "..." : message;
+    }
+
+    static String weatherFallbackErrorMessage(Exception primaryError, Exception fallbackError) {
+        return "Open-Meteo non disponibile (" + conciseErrorMessage(primaryError)
+                + "); MET Norway non disponibile (" + conciseErrorMessage(fallbackError) + ")";
+    }
+
+    private static String fetchMetNorwayForecast(double latitude, double longitude,
+                                                 ZoneId forecastZone) throws Exception {
         String lat = String.format(Locale.US, "%.4f", latitude);
         String lon = String.format(Locale.US, "%.4f", longitude);
-        String cacheKey = lat + "," + lon;
+        String cacheKey = lat + "," + lon + "," + forecastZone.getId();
         long now = System.currentTimeMillis();
         synchronized (MET_NO_FORECAST_CACHE) {
             CachedWeatherForecast cached = MET_NO_FORECAST_CACHE.get(cacheKey);
@@ -3178,7 +3413,7 @@ public class MeteoBettiUltimateOS {
         String endpoint = "https://api.met.no/weatherapi/locationforecast/2.0/compact?lat="
                 + lat + "&lon=" + lon;
         String response = executeHttpGET(endpoint, null, MET_NO_USER_AGENT);
-        String forecastJson = normalizeMetNorwayForecast(response);
+        String forecastJson = normalizeMetNorwayForecast(response, forecastZone);
         synchronized (MET_NO_FORECAST_CACHE) {
             MET_NO_FORECAST_CACHE.put(cacheKey,
                     new CachedWeatherForecast(System.currentTimeMillis(), forecastJson));
@@ -3218,18 +3453,17 @@ public class MeteoBettiUltimateOS {
         }
     }
 
-    private static String normalizeMetNorwayForecast(String response) throws Exception {
+    private static String normalizeMetNorwayForecast(String response, ZoneId forecastZone) throws Exception {
         String[] timeSeries = extractJsonObjectsFromArray(response, "\"timeseries\":[");
         if (timeSeries.length == 0) {
             throw new IllegalStateException("MET Norway non ha restituito previsioni orarie");
         }
 
-        ZoneId localZone = ZoneId.systemDefault();
         java.util.List<MetNorwayForecastPoint> points = new java.util.ArrayList<>(timeSeries.length);
         for (String timeEntry : timeSeries) {
             String timestamp = parseJsonString(timeEntry, "time");
             if (timestamp.isEmpty()) continue;
-            ZonedDateTime localTime = Instant.parse(timestamp).atZone(localZone);
+            ZonedDateTime localTime = Instant.parse(timestamp).atZone(forecastZone);
             String data = extractJsonObjectAfter(timeEntry, "\"data\":");
             String instant = extractJsonObjectAfter(data, "\"instant\":");
             String details = extractJsonObjectAfter(instant, "\"details\":");
@@ -3249,7 +3483,7 @@ public class MeteoBettiUltimateOS {
             throw new IllegalStateException("MET Norway non ha restituito valori meteo utilizzabili");
         }
 
-        ZonedDateTime now = ZonedDateTime.now(localZone);
+        ZonedDateTime now = ZonedDateTime.now(forecastZone);
         int currentIndex = 0;
         while (currentIndex < points.size() - 1 && points.get(currentIndex).time.isBefore(now)) {
             currentIndex++;
@@ -3495,7 +3729,7 @@ public class MeteoBettiUltimateOS {
                     airQualityPm25Label.setText(String.format(Locale.ITALIAN, "PM2.5: %.1f µg/m³", pm25));
                     airQualityPm10Label.setText(String.format(Locale.ITALIAN, "PM10: %.1f µg/m³", pm10));
                     airQualityNo2Label.setText(String.format(Locale.ITALIAN, "NO₂: %.1f µg/m³", no2));
-                    setForecastDates(airQualityDateSelector, uniqueDates(times));
+                    setForecastDates(airQualityDateSelector, uniqueDates(times), true);
                     ForecastDateOption selectedDate =
                             (ForecastDateOption) airQualityDateSelector.getSelectedItem();
                     if (selectedDate != null) {

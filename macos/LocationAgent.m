@@ -93,8 +93,13 @@
 
 @end
 
-int main(void) {
+int main(int argc, const char *argv[]) {
     @autoreleasepool {
+        if (argc < 2) {
+            fprintf(stderr, "Percorso di risposta non specificato\n");
+            return EXIT_FAILURE;
+        }
+
         LocationAgent *agent = [[LocationAgent alloc] init];
         [agent start];
 
@@ -103,13 +108,23 @@ int main(void) {
             [[NSRunLoop mainRunLoop] runMode:NSDefaultRunLoopMode beforeDate:deadline];
         }
 
+        NSString *result;
         if (agent.output.length == 0) {
             NSString *message = agent.failure ?: @"Tempo scaduto durante la richiesta di posizione";
-            fprintf(stderr, "%s\n", message.UTF8String);
-            return EXIT_FAILURE;
+            result = [@"ERROR|" stringByAppendingString:message];
+        } else {
+            result = [@"OK|" stringByAppendingString:agent.output];
         }
 
-        printf("%s\n", agent.output.UTF8String);
-        return EXIT_SUCCESS;
+        NSString *outputPath = [NSString stringWithUTF8String:argv[1]];
+        NSFileHandle *outputHandle = [NSFileHandle fileHandleForWritingAtPath:outputPath];
+        if (outputHandle == nil) {
+            fprintf(stderr, "Impossibile aprire il file di risposta\n");
+            return EXIT_FAILURE;
+        }
+        [outputHandle truncateFileAtOffset:0];
+        [outputHandle writeData:[result dataUsingEncoding:NSUTF8StringEncoding]];
+        [outputHandle closeFile];
+        return agent.output.length == 0 ? EXIT_FAILURE : EXIT_SUCCESS;
     }
 }

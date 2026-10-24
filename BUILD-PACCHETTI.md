@@ -50,11 +50,24 @@ meteo e cartografiche accettano solo HTTPS verso i servizi previsti, non seguono
 redirect e limitano la dimensione delle risposte e delle immagini radar.
 Il nome scelto viene salvato nelle preferenze locali del sistema.
 La mappa radar resta centrata sulla località cercata, con raggio fisso di 100 km;
-non si sposta con il mouse o con la rotella e mostra messaggi di errore leggibili
-senza esporre i codici tecnici dei servizi.
-La schermata meteo mostra la fonte usata. Nei grafici, un dato mancante è
-distinto dalle previsioni non ancora caricate; la probabilità di pioggia viene
-segnalata come non disponibile quando si usa MET Norway.
+non si sposta con il mouse o con la rotella. Il livello di zoom delle tessere è
+limitato a quello supportato dal radar per evitare avvisi sovrapposti; i bordi
+delle tessere adiacenti vengono sovrapposti leggermente per evitare righe vuote.
+Una nuova ricerca torna alla dashboard e seleziona il primo giorno disponibile.
+La schermata meteo mostra la fonte usata. Se Open-Meteo restituisce valori
+mancanti per temperatura, umidità, pressione, vento, condizioni o UV, l'app
+prova a integrare solo quei valori con MET Norway, senza sovrascrivere i dati
+già ricevuti, e indica i campi integrati. Se anche la seconda fonte non fornisce
+un valore, questo resta non disponibile: MET Norway, per esempio, non fornisce
+la probabilità di pioggia. Nei grafici, un dato mancante è distinto dalle
+previsioni non ancora caricate.
+Se la richiesta Open-Meteo fallisce per limite, timeout o errore di rete, l'app
+prova MET Norway; se falliscono entrambe le fonti, mostra l'errore di entrambe.
+Su macOS la geolocalizzazione richiede il permesso “durante l'uso” per
+“MeteoBetti Location” nelle impostazioni di Privacy e Sicurezza. L'helper viene
+avviato come app macOS, così il sistema può mostrare correttamente la richiesta
+di autorizzazione; le coordinate di risposta vengono scambiate tramite un file
+temporaneo con permessi privati, poi rimosso.
 
 Il workflow esegue anche controlli automatici su connessioni sicure, nomi salvati
 e dimensioni delle immagini prima di creare i pacchetti. Le azioni GitHub sono
