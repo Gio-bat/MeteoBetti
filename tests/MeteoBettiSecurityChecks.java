@@ -12,6 +12,7 @@ public final class MeteoBettiSecurityChecks {
         verifyLocationNameHandling();
         verifyTileImageLimits();
         verifyFixedRadarRadius();
+        verifyForecastAvailabilityMessages();
         System.out.println("Verifiche MeteoBetti superate.");
     }
 
@@ -95,6 +96,30 @@ public final class MeteoBettiSecurityChecks {
         } catch (IllegalArgumentException expected) {
             // Expected: invalid map coordinates must never reach the tile calculation.
         }
+    }
+
+    private static void verifyForecastAvailabilityMessages() {
+        check(MeteoBettiUltimateOS.analyticsNoDataMessage(
+                        "Probabilità pioggia", 7, 0, "MET Norway")
+                        .equals("Probabilità pioggia non disponibile da MET Norway"),
+                "Il fallback deve spiegare che non fornisce probabilità di pioggia");
+        check(MeteoBettiUltimateOS.analyticsNoDataMessage(
+                        "Vento medio", 7, 0, "Open-Meteo")
+                        .equals("Dato non disponibile da Open-Meteo"),
+                "I dati mancanti non devono sembrare ancora in caricamento");
+        check(MeteoBettiUltimateOS.analyticsNoDataMessage(
+                        "Vento medio", 0, 0, "Open-Meteo")
+                        .equals("Previsioni giornaliere non caricate"),
+                "La schermata deve distinguere le previsioni non ancora caricate");
+        check(MeteoBettiUltimateOS.analyticsNoDataMessage(
+                        "Vento medio", 7, 1, "Open-Meteo").isEmpty(),
+                "Un grafico con almeno un valore non deve mostrare un messaggio di assenza");
+        check(MeteoBettiUltimateOS.weatherSourceStatus("MET Norway")
+                        .contains("MET Norway") && MeteoBettiUltimateOS.weatherSourceStatus("MET Norway")
+                        .contains("probabilità pioggia non disponibile"),
+                "La fonte alternativa e il suo dato pioggia mancante devono essere visibili");
+        check(MeteoBettiUltimateOS.weatherSourceStatus("Open-Meteo").equals("Fonte meteo: Open-Meteo"),
+                "La fonte principale deve essere mostrata");
     }
 
     private static void expectRejected(String endpoint) throws Exception {

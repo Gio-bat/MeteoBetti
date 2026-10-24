@@ -52,6 +52,9 @@ Il nome scelto viene salvato nelle preferenze locali del sistema.
 La mappa radar resta centrata sulla località cercata, con raggio fisso di 100 km;
 non si sposta con il mouse o con la rotella e mostra messaggi di errore leggibili
 senza esporre i codici tecnici dei servizi.
+La schermata meteo mostra la fonte usata. Nei grafici, un dato mancante è
+distinto dalle previsioni non ancora caricate; la probabilità di pioggia viene
+segnalata come non disponibile quando si usa MET Norway.
 
 Il workflow esegue anche controlli automatici su connessioni sicure, nomi salvati
 e dimensioni delle immagini prima di creare i pacchetti. Le azioni GitHub sono

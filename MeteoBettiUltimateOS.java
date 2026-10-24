@@ -101,6 +101,7 @@ public class MeteoBettiUltimateOS {
     protected static JLabel mainLocationDisplayLabel;
     protected static JLabel mainTempDisplayLabel;
     protected static JLabel conditionTextLabel;
+    private static JLabel weatherSourceLabel;
     protected static DefaultTableModel forecastTableModel;
     protected static HourlyTimelineStrip hourlyTimelineStrip;
     protected static JTextField searchTextField;
@@ -636,6 +637,11 @@ public class MeteoBettiUltimateOS {
         conditionTextLabel.setForeground(new Color(211, 220, 230));
         conditionTextLabel.setAlignmentX(Component.CENTER_ALIGNMENT);
 
+        weatherSourceLabel = new JLabel("Fonte meteo: in attesa dei dati");
+        weatherSourceLabel.setFont(uiFont(Font.PLAIN, 10f));
+        weatherSourceLabel.setForeground(new Color(193, 205, 218));
+        weatherSourceLabel.setAlignmentX(Component.CENTER_ALIGNMENT);
+
         heroCard.add(heroCardTitle);
         heroCard.add(Box.createVerticalStrut(6));
         heroCard.add(mainLocationDisplayLabel);
@@ -643,6 +649,8 @@ public class MeteoBettiUltimateOS {
         heroCard.add(tempRow);
         heroCard.add(Box.createVerticalStrut(2));
         heroCard.add(conditionTextLabel);
+        heroCard.add(Box.createVerticalStrut(4));
+        heroCard.add(weatherSourceLabel);
 
         heroCard.addMouseListener(new MouseAdapter() {
             @Override
@@ -846,9 +854,9 @@ public class MeteoBettiUltimateOS {
             String average = Double.isFinite(forecast.meanTemperature)
                     ? String.format(Locale.ITALIAN, "%.1f°", forecast.meanTemperature) : "--°";
             String precipitation = Double.isFinite(forecast.precipitationProbability)
-                    ? String.format(Locale.ITALIAN, "%.0f%%", forecast.precipitationProbability) : "--";
+                    ? String.format(Locale.ITALIAN, "%.0f%%", forecast.precipitationProbability) : "N/D";
             String wind = Double.isFinite(forecast.meanWindSpeed)
-                    ? String.format(Locale.ITALIAN, "%.0f km/h", forecast.meanWindSpeed) : "-- km/h";
+                    ? String.format(Locale.ITALIAN, "%.0f km/h", forecast.meanWindSpeed) : "N/D";
             String icon = forecast.weatherCode < 0 ? "—" : resolveEmoji(forecast.weatherCode);
             String html = "<html><div style='text-align:left; color:#f1f4f8; padding:2px; font-size:12px;'>" +
                     "<b>" + escapeHtml(forecast.shortDate()) + "</b> <span style='font-size:16px;'>" + icon + "</span><br>" +
@@ -1242,7 +1250,9 @@ public class MeteoBettiUltimateOS {
                 if (data.length == 0 || availableValues == 0) {
                     g2.setFont(uiFont(Font.PLAIN, 12f));
                     g2.setColor(new Color(197, 205, 215));
-                    g2.drawString("In attesa delle previsioni giornaliere", 14, getHeight() / 2);
+                    String unavailableMessage = analyticsNoDataMessage(
+                            title, data.length, availableValues, weatherDataSourceName);
+                    g2.drawString(unavailableMessage, 14, getHeight() / 2);
                     g2.dispose();
                     return;
                 }
@@ -1353,6 +1363,17 @@ public class MeteoBettiUltimateOS {
             }
 
         }
+    }
+
+    static String analyticsNoDataMessage(String metric, int forecastCount,
+                                         int availableValues, String dataSource) {
+        if (forecastCount == 0) return "Previsioni giornaliere non caricate";
+        if (availableValues > 0) return "";
+        if (metric.equals("Probabilità pioggia") && "MET Norway".equals(dataSource)) {
+            return "Probabilità pioggia non disponibile da MET Norway";
+        }
+        return "Dato non disponibile" + (dataSource == null || dataSource.isBlank()
+                ? " dalla fonte meteo" : " da " + dataSource);
     }
 
     private static JPanel buildRadarPage() {
@@ -2956,6 +2977,9 @@ public class MeteoBettiUltimateOS {
             if (mainLocationDisplayLabel != null) {
                 mainLocationDisplayLabel.setText("Dati meteo non disponibili");
             }
+            if (weatherSourceLabel != null) {
+                weatherSourceLabel.setText("Fonte meteo: dati non disponibili");
+            }
             JOptionPane.showMessageDialog(parentFrame,
                     message + "\n" + finalDetails, "Errore di Rete", JOptionPane.ERROR_MESSAGE);
         });
@@ -3072,7 +3096,8 @@ public class MeteoBettiUltimateOS {
         stationPressure = press;
         stationWindSpeed = rawWind;
         stationUvIndex = uvMax;
-        weatherDataSourceName = dataSource;
+        final String selectedDataSource = dataSource;
+        weatherDataSourceName = selectedDataSource;
 
         String desc = resolveDescription(wCode);
         String ico = resolveEmoji(wCode);
@@ -3080,6 +3105,9 @@ public class MeteoBettiUltimateOS {
 
         SwingUtilities.invokeLater(() -> {
             mainLocationDisplayLabel.setText(country.isEmpty() ? name : name + ", " + country);
+            if (weatherSourceLabel != null) {
+                weatherSourceLabel.setText(weatherSourceStatus(selectedDataSource));
+            }
             mainTempDisplayLabel.setText(Math.round(t) + "°");
             if (heroIconLabel != null) heroIconLabel.setText(ico);
             conditionTextLabel.setText(desc + "  ·  percepita "
@@ -3118,6 +3146,14 @@ public class MeteoBettiUltimateOS {
                 rootWindow.repaint();
             }
         });
+    }
+
+    static String weatherSourceStatus(String dataSource) {
+        if ("MET Norway".equals(dataSource)) {
+            return "Fonte meteo: MET Norway · probabilità pioggia non disponibile";
+        }
+        return "Fonte meteo: " + (dataSource == null || dataSource.isBlank()
+                ? "non disponibile" : dataSource);
     }
 
     private static boolean isHttpRateLimit(Exception error) {
