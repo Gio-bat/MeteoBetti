@@ -6,7 +6,7 @@ $ClassesDir = Join-Path $BuildRoot "classes"
 $InputDir = Join-Path $BuildRoot "input"
 $DistDir = Join-Path $BuildRoot "dist"
 $AppName = "MeteoBettiUltimateOS"
-$AppVersion = if ($env:APP_VERSION) { $env:APP_VERSION } else { "1.0.3" }
+$AppVersion = if ($env:APP_VERSION) { $env:APP_VERSION } else { "1.0.4" }
 $AppImage = Join-Path $DistDir $AppName
 $ArchivePath = Join-Path $DistDir "$AppName-windows.zip"
 

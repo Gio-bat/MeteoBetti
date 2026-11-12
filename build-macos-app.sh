@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 BUILD_ROOT="$ROOT/build/macos"
 APP_NAME="MeteoBettiUltimateOS"
-APP_VERSION="${APP_VERSION:-1.0.3}"
+APP_VERSION="${APP_VERSION:-1.0.4}"
 PACKAGE_SUFFIX="${PACKAGE_SUFFIX:-macos}"
 APP_IMAGE="$BUILD_ROOT/dist/$APP_NAME.app"
 DMG_PATH="$BUILD_ROOT/dist/$APP_NAME-$PACKAGE_SUFFIX.dmg"

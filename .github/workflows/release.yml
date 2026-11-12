@@ -18,7 +18,7 @@ jobs:
       matrix:
         include:
           - platform: macOS-arm64
-            runner: macos-14
+            runner: macos-15
             script: build-macos-app.sh
             package_suffix: macos-arm64
             artifact: build/macos/dist/MeteoBettiUltimateOS-macos-arm64.dmg
@@ -51,7 +51,7 @@ jobs:
         shell: bash
         run: |
           if [[ ! "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "Use a version tag such as v1.0.3." >&2
+            echo "Use a version tag such as v1.0.4." >&2
             exit 1
           fi
           echo "APP_VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
