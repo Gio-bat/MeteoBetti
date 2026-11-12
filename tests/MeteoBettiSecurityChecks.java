@@ -9,8 +9,17 @@ public final class MeteoBettiSecurityChecks {
 
     public static void main(String[] args) throws Exception {
         verifyAllowedHostsAndHttps();
+        verifyOfficialWeatherAlertParsing();
         verifyLocationNameHandling();
+        verifyThemePreferenceHandling();
+        verifyStartupSplashMinimumDuration();
+        verifyLocationSuggestionEnterBehavior();
+        verifyHourlyTimelineKeepsFiveFixedCells();
+        verifyWeatherWallpaperSelection();
+        verifyWindyWebcamLink();
         verifyTileImageLimits();
+        verifyWeatherIconsRender();
+        verifyLocationSuggestionParsing();
         verifyFixedRadarRadius();
         verifyForecastDateReset();
         verifyForecastAvailabilityMessages();
@@ -24,6 +33,8 @@ public final class MeteoBettiSecurityChecks {
                 "Open-Meteo deve essere autorizzato");
         check(MeteoBettiUltimateOS.isAllowedRemoteHost("tilecache.rainviewer.com"),
                 "I tile RainViewer devono essere autorizzati");
+        check(MeteoBettiUltimateOS.isAllowedRemoteHost("feeds.meteoalarm.org"),
+                "Il feed ufficiale delle allerte deve essere autorizzato");
         check(!MeteoBettiUltimateOS.isAllowedRemoteHost("rainviewer.com.attacker.example"),
                 "Un dominio che imita RainViewer deve essere rifiutato");
 
@@ -39,6 +50,87 @@ public final class MeteoBettiSecurityChecks {
         expectRejected("https://attacker.example/");
         expectRejected("https://user@api.open-meteo.com/");
         expectRejected("https://api.open-meteo.com:8443/");
+    }
+
+    private static void verifyOfficialWeatherAlertParsing() throws Exception {
+        String feed = """
+                <?xml version="1.0" encoding="UTF-8"?>
+                <feed xmlns="http://www.w3.org/2005/Atom"
+                      xmlns:cap="urn:oasis:names:tc:emergency:cap:1.2">
+                  <entry>
+                    <cap:areaDesc>Piemonte</cap:areaDesc>
+                    <cap:event>Yellow Rain Warning</cap:event>
+                    <cap:severity>Moderate</cap:severity>
+                    <cap:status>Actual</cap:status>
+                    <cap:message_type>Alert</cap:message_type>
+                    <cap:effective>2026-01-01T08:00:00+00:00</cap:effective>
+                    <cap:expires>2026-01-01T12:00:00+00:00</cap:expires>
+                    <cap:identifier>yellow-rain</cap:identifier>
+                  </entry>
+                  <entry>
+                    <cap:areaDesc>Piemonte</cap:areaDesc>
+                    <cap:event>Red Flood Warning</cap:event>
+                    <cap:severity>Extreme</cap:severity>
+                    <cap:status>Actual</cap:status>
+                    <cap:message_type>Update</cap:message_type>
+                    <cap:effective>2026-01-01T08:00:00+00:00</cap:effective>
+                    <cap:expires>2026-01-01T11:00:00+00:00</cap:expires>
+                    <cap:identifier>red-flood</cap:identifier>
+                  </entry>
+                  <entry>
+                    <cap:areaDesc>Lazio</cap:areaDesc>
+                    <cap:event>Red Thunderstorm Warning</cap:event>
+                    <cap:severity>Extreme</cap:severity>
+                    <cap:status>Actual</cap:status>
+                    <cap:message_type>Alert</cap:message_type>
+                    <cap:effective>2026-01-01T08:00:00+00:00</cap:effective>
+                    <cap:expires>2026-01-01T12:00:00+00:00</cap:expires>
+                    <cap:identifier>other-region</cap:identifier>
+                  </entry>
+                  <entry>
+                    <cap:areaDesc>Piemonte</cap:areaDesc>
+                    <cap:event>Red Wind Warning</cap:event>
+                    <cap:severity>Extreme</cap:severity>
+                    <cap:status>Actual</cap:status>
+                    <cap:message_type>Cancel</cap:message_type>
+                    <cap:effective>2026-01-01T08:00:00+00:00</cap:effective>
+                    <cap:expires>2026-01-01T12:00:00+00:00</cap:expires>
+                    <cap:identifier>cancelled</cap:identifier>
+                  </entry>
+                  <entry>
+                    <cap:areaDesc>Piemonte</cap:areaDesc>
+                    <cap:event>Red Wind Warning</cap:event>
+                    <cap:severity>Extreme</cap:severity>
+                    <cap:status>Actual</cap:status>
+                    <cap:message_type>Alert</cap:message_type>
+                    <cap:effective>2025-12-01T08:00:00+00:00</cap:effective>
+                    <cap:expires>2025-12-01T12:00:00+00:00</cap:expires>
+                    <cap:identifier>expired</cap:identifier>
+                  </entry>
+                </feed>
+                """;
+        var alerts = MeteoBettiUltimateOS.parseWeatherAlerts(feed, "Piemonte",
+                java.time.Instant.parse("2026-01-01T10:00:00Z"));
+        check(alerts.size() == 2, "Mostra solo avvisi attivi, pubblicati e della regione scelta");
+        check(alerts.get(0).severityLevel == 3
+                        && alerts.get(0).severityLabel.equals("ALLERTA ROSSA"),
+                "Gli avvisi più gravi devono essere ordinati prima e identificati in rosso");
+        check(alerts.stream().anyMatch(alert -> alert.severityLevel == 1
+                        && alert.event.equals("Yellow Rain Warning")),
+                "Le allerte gialle devono mantenere la gravità segnalata dalla fonte");
+        check(MeteoBettiUltimateOS.parseWeatherAlerts(feed, "Lazio",
+                        java.time.Instant.parse("2026-01-01T10:00:00Z")).size() == 1,
+                "Gli avvisi devono essere filtrati sulla regione cercata");
+
+        String externalEntity = "<!DOCTYPE feed [<!ENTITY xxe SYSTEM \"file:///etc/passwd\">]>"
+                + "<feed xmlns=\"http://www.w3.org/2005/Atom\"><entry>&xxe;</entry></feed>";
+        try {
+            MeteoBettiUltimateOS.parseWeatherAlerts(externalEntity, "Piemonte",
+                    java.time.Instant.parse("2026-01-01T10:00:00Z"));
+            throw new AssertionError("Il parser allerte deve rifiutare entità XML esterne");
+        } catch (org.xml.sax.SAXException expected) {
+            // External XML entities must be rejected.
+        }
     }
 
     private static void verifyLocationNameHandling() throws Exception {
@@ -62,6 +154,93 @@ public final class MeteoBettiSecurityChecks {
         }
     }
 
+    private static void verifyThemePreferenceHandling() throws Exception {
+        Preferences preferences = Preferences.userRoot()
+                .node("MeteoBetti/Tests/" + UUID.randomUUID());
+        try {
+            MeteoBettiUltimateOS.saveLightTheme(preferences, true);
+            check(MeteoBettiUltimateOS.loadLightTheme(preferences),
+                    "La preferenza del tema chiaro deve persistere");
+            MeteoBettiUltimateOS.saveLightTheme(preferences, false);
+            check(!MeteoBettiUltimateOS.loadLightTheme(preferences),
+                    "La preferenza deve consentire il ripristino del tema scuro");
+        } finally {
+            preferences.removeNode();
+            Preferences.userRoot().flush();
+        }
+    }
+
+    private static void verifyHourlyTimelineKeepsFiveFixedCells() {
+        var previousModel = MeteoBettiUltimateOS.forecastTableModel;
+        MeteoBettiUltimateOS.forecastTableModel = new javax.swing.table.DefaultTableModel(
+                new Object[][]{{"14:00", 0, "20°C", "5 km/h"},
+                        {"15:00", 1, "21°C", "7 km/h"}},
+                new Object[]{"Orario", "Meteo", "Temp.", "Vento"});
+        try {
+            MeteoBettiUltimateOS.HourlyTimelineStrip strip =
+                    new MeteoBettiUltimateOS.HourlyTimelineStrip();
+            check(strip.getComponentCount() == 5,
+                    "La timeline deve mantenere cinque celle anche quando restano poche ore");
+            int firstWidth = strip.getComponent(0).getPreferredSize().width;
+            for (int index = 1; index < strip.getComponentCount(); index++) {
+                check(strip.getComponent(index).getPreferredSize().width == firstWidth,
+                        "Le celle orarie devono mantenere la stessa larghezza");
+            }
+        } finally {
+            MeteoBettiUltimateOS.forecastTableModel = previousModel;
+        }
+    }
+
+    private static void verifyWeatherWallpaperSelection() {
+        check(MeteoBettiUltimateOS.wallpaperFileName(0).equals("sfondo_sole.jpg"),
+                "Il cielo sereno deve usare lo sfondo del sole");
+        check(MeteoBettiUltimateOS.wallpaperFileName(1).equals("sfondo_nuvoloso.jpg")
+                        && MeteoBettiUltimateOS.wallpaperFileName(2).equals("sfondo_nuvoloso.jpg")
+                        && MeteoBettiUltimateOS.wallpaperFileName(3).equals("sfondo_nuvoloso.jpg"),
+                "Le condizioni da poco nuvoloso a coperto devono usare lo sfondo nuvoloso");
+        check(MeteoBettiUltimateOS.wallpaperFileName(45).equals("sfondo_nuvoloso.jpg")
+                        && MeteoBettiUltimateOS.wallpaperFileName(48).equals("sfondo_nuvoloso.jpg"),
+                "La nebbia deve usare lo sfondo nuvoloso");
+        check(MeteoBettiUltimateOS.wallpaperFileName(61).equals("sfondo_pioggia.jpg")
+                        && MeteoBettiUltimateOS.wallpaperFileName(95).equals("sfondo_pioggia.jpg"),
+                "Pioggia e temporale devono usare lo sfondo della pioggia");
+        check(MeteoBettiUltimateOS.wallpaperFileName(0, true).equals("sfondo_notte_sole.jpg")
+                        && MeteoBettiUltimateOS.wallpaperFileName(3, true).equals("sfondo_notte_nuvoloso.jpg")
+                        && MeteoBettiUltimateOS.wallpaperFileName(61, true).equals("sfondo_notte_pioggia.jpg"),
+                "La notte deve selezionare gli sfondi notturni con i tag corretti");
+        check(MeteoBettiUltimateOS.wallpaperFileName(0, false).equals("sfondo_sole.jpg"),
+                "Di giorno gli sfondi esistenti devono restare invariati");
+        check(!MeteoBettiUltimateOS.isNightAt("2026-06-21T12:00", "Europe/Rome",
+                        41.9028, 12.4964)
+                        && MeteoBettiUltimateOS.isNightAt("2026-06-21T00:00", "Europe/Rome",
+                        41.9028, 12.4964),
+                "Il rilevamento solare deve distinguere giorno e notte nell'ora locale");
+    }
+
+    private static void verifyStartupSplashMinimumDuration() {
+        check(MeteoBettiUltimateOS.startupSplashRemainingMillis(0) == 2_000,
+                "La schermata di avvio deve restare visibile almeno due secondi");
+        check(MeteoBettiUltimateOS.startupSplashRemainingMillis(1_999) == 1
+                        && MeteoBettiUltimateOS.startupSplashRemainingMillis(2_000) == 0
+                        && MeteoBettiUltimateOS.startupSplashRemainingMillis(3_000) == 0,
+                "La schermata di avvio deve chiudersi appena raggiunta la durata minima");
+    }
+
+    private static void verifyWindyWebcamLink() {
+        var uri = MeteoBettiUltimateOS.buildWindyWebcamsUri(45.0703, 7.6869);
+        check(uri.getScheme().equals("https") && uri.getHost().equals("www.windy.com"),
+                "La sezione webcam deve aprire solo il sito HTTPS ufficiale di Windy");
+        check(uri.getPath().equals("/it/-Webcam/webcams")
+                        && uri.getQuery().equals("45.0703,7.6869,8"),
+                "La mappa webcam deve centrarsi sulle coordinate della località cercata");
+        try {
+            MeteoBettiUltimateOS.buildWindyWebcamsUri(Double.NaN, 0);
+            throw new AssertionError("Coordinate non valide non devono generare un link webcam");
+        } catch (IllegalArgumentException expected) {
+            // Invalid coordinates must not produce an external URL.
+        }
+    }
+
     private static void verifyTileImageLimits() throws Exception {
         BufferedImage validImage = new BufferedImage(256, 256, BufferedImage.TYPE_INT_ARGB);
         ByteArrayOutputStream validBytes = new ByteArrayOutputStream();
@@ -79,6 +258,86 @@ public final class MeteoBettiSecurityChecks {
         } catch (IllegalArgumentException expected) {
             // Expected: remote tile dimensions are bounded before decoding.
         }
+    }
+
+    private static void verifyWeatherIconsRender() {
+        int[] weatherCodes = {0, 2, 3, 45, 61, 71, 95, -1};
+        for (int code : weatherCodes) {
+            for (boolean night : new boolean[]{false, true}) {
+                MeteoBettiUltimateOS.WeatherIcon icon =
+                        new MeteoBettiUltimateOS.WeatherIcon(code, 32, night);
+                BufferedImage image = new BufferedImage(32, 32, BufferedImage.TYPE_INT_ARGB);
+                java.awt.Graphics2D graphics = image.createGraphics();
+                icon.paintIcon(null, graphics, 0, 0);
+                graphics.dispose();
+                boolean hasVisiblePixels = false;
+                for (int y = 0; y < image.getHeight() && !hasVisiblePixels; y++) {
+                    for (int x = 0; x < image.getWidth(); x++) {
+                        if ((image.getRGB(x, y) >>> 24) != 0) {
+                            hasVisiblePixels = true;
+                            break;
+                        }
+                    }
+                }
+                check(hasVisiblePixels, "L'icona meteo deve essere disegnata per il codice "
+                        + code + (night ? " di notte" : " di giorno"));
+            }
+        }
+        BufferedImage dayMoonWeather = renderWeatherIcon(0, false);
+        BufferedImage nightMoonWeather = renderWeatherIcon(0, true);
+        boolean dayNightIconDiffers = false;
+        for (int y = 0; y < dayMoonWeather.getHeight() && !dayNightIconDiffers; y++) {
+            for (int x = 0; x < dayMoonWeather.getWidth(); x++) {
+                if (dayMoonWeather.getRGB(x, y) != nightMoonWeather.getRGB(x, y)) {
+                    dayNightIconDiffers = true;
+                    break;
+                }
+            }
+        }
+        check(dayNightIconDiffers, "Con cielo sereno l'icona notturna deve mostrare la luna");
+    }
+
+    private static BufferedImage renderWeatherIcon(int code, boolean night) {
+        MeteoBettiUltimateOS.WeatherIcon icon =
+                new MeteoBettiUltimateOS.WeatherIcon(code, 32, night);
+        BufferedImage image = new BufferedImage(32, 32, BufferedImage.TYPE_INT_ARGB);
+        java.awt.Graphics2D graphics = image.createGraphics();
+        icon.paintIcon(null, graphics, 0, 0);
+        graphics.dispose();
+        return image;
+    }
+
+    private static void verifyLocationSuggestionParsing() {
+        String response = "{\"results\":["
+                + "{\"name\":\"Torino\",\"latitude\":45.0703,\"longitude\":7.6869,"
+                + "\"country\":\"Italia\",\"admin1\":\"Piemonte\"},"
+                + "{\"name\":\"San \\\"Luca\\\"\",\"latitude\":44.5,\"longitude\":11.3,"
+                + "\"country\":\"Italia\",\"admin1\":null,\"admin1_id\":42},"
+                + "{\"name\":\"Coordinate errate\",\"latitude\":100,\"longitude\":0,"
+                + "\"country\":\"Italia\",\"admin1\":\"Test\"}]}";
+        var suggestions = MeteoBettiUltimateOS.parseLocationSuggestions(response);
+        check(suggestions.size() == 2, "I suggerimenti devono ignorare coordinate non valide");
+        check(suggestions.get(0).displayName().equals("Torino, Piemonte")
+                        && suggestions.get(0).subtitle().equals("Piemonte · Italia"),
+                "Il suggerimento deve mostrare città, provincia/regione e Paese");
+        check(suggestions.get(1).name.equals("San \"Luca\"")
+                        && suggestions.get(1).admin1.isEmpty()
+                        && suggestions.get(1).displayName().equals("San \"Luca\""),
+                "Il parser deve gestire stringhe escape e province non disponibili");
+        check(Math.abs(suggestions.get(0).latitude - 45.0703) < 0.0001
+                        && Math.abs(suggestions.get(0).longitude - 7.6869) < 0.0001,
+                "Il suggerimento deve conservare le coordinate della località selezionata");
+        check(MeteoBettiUltimateOS.parseLocationSuggestions("{\"results\":[] }").isEmpty(),
+                "Una risposta senza risultati deve produrre una lista vuota");
+    }
+
+    private static void verifyLocationSuggestionEnterBehavior() {
+        check(MeteoBettiUltimateOS.shouldSelectLocationSuggestionOnEnter(true, 1, 3),
+                "Invio deve selezionare un suggerimento evidenziato");
+        check(!MeteoBettiUltimateOS.shouldSelectLocationSuggestionOnEnter(true, -1, 3)
+                        && !MeteoBettiUltimateOS.shouldSelectLocationSuggestionOnEnter(false, 0, 3)
+                        && !MeteoBettiUltimateOS.shouldSelectLocationSuggestionOnEnter(true, 3, 3),
+                "Invio senza una selezione valida deve cercare il testo digitato");
     }
 
     private static void verifyFixedRadarRadius() {

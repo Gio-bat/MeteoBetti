@@ -7,7 +7,7 @@ CLASSES_DIR="$BUILD_ROOT/classes"
 INPUT_DIR="$BUILD_ROOT/input"
 DIST_DIR="$BUILD_ROOT/dist"
 APP_NAME="MeteoBettiUltimateOS"
-APP_VERSION="${APP_VERSION:-1.0.0}"
+APP_VERSION="${APP_VERSION:-1.0.3}"
 APP_IMAGE="$DIST_DIR/$APP_NAME"
 ARCHIVE_PATH="$DIST_DIR/$APP_NAME-linux-$(uname -m).tar.gz"
 
@@ -30,7 +30,13 @@ jar --create --file "$INPUT_DIR/$APP_NAME.jar" \
     -C "$CLASSES_DIR" . \
     -C "$ROOT" sfondo_sole.jpg \
     -C "$ROOT" sfondo_pioggia.jpg \
-    -C "$ROOT" sfondo_nuvoloso.jpg
+    -C "$ROOT" sfondo_nuvoloso.jpg \
+    -C "$ROOT/icons" meteo-betti-icon.png
+for wallpaper in sfondo_notte_sole.jpg sfondo_notte_nuvoloso.jpg sfondo_notte_pioggia.jpg sfondo_notte.jpg; do
+    if [[ -f "$ROOT/$wallpaper" ]]; then
+        jar --update --file "$INPUT_DIR/$APP_NAME.jar" -C "$ROOT" "$wallpaper"
+    fi
+done
 
 if [[ -d "$APP_IMAGE" ]]; then
     rm -rf "$APP_IMAGE"
@@ -43,6 +49,7 @@ jpackage \
     --main-jar "$APP_NAME.jar" \
     --main-class MeteoBettiUltimateOS \
     --dest "$DIST_DIR" \
+    --icon "$ROOT/icons/meteo-betti-icon.png" \
     --app-version "$APP_VERSION" \
     --vendor "MeteoBetti"
 

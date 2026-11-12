@@ -2,6 +2,13 @@
 
 Questi pacchetti includono il runtime Java: chi li usa non deve installare Java.
 Per prepararli serve invece un JDK 25 con `javac`, `jar` e `jpackage` disponibili nel `PATH`.
+I pacchetti e la finestra dell'app usano l'icona fornita come `icona.jpg`, già
+preparata nei formati PNG, ICNS e ICO nella cartella `icons`.
+Gli sfondi notturni sono facoltativi: aggiungi nella cartella del progetto
+`sfondo_notte_sole.jpg`, `sfondo_notte_nuvoloso.jpg` e/o
+`sfondo_notte_pioggia.jpg`. L'app li sceglie in base all'ora locale della
+località e alla condizione meteo; se manca il file specifico usa il relativo
+sfondo diurno. Gli script di build includono automaticamente quelli presenti.
 
 Ogni pacchetto va creato sul sistema operativo di destinazione:
 
@@ -24,7 +31,7 @@ Il workflow `.github/workflows/release.yml` compila i tre pacchetti su runner
 macOS, Windows e Linux, con versioni macOS per Apple Silicon e Intel. Per usarlo,
 il progetto deve essere in un repository GitHub. Dopo aver caricato il codice e
 i file del progetto su GitHub, crea e pubblica un tag versione, per esempio
-`v1.0.0`: il workflow prepara i pacchetti e li allega a una GitHub Release
+`v1.0.3`: il workflow prepara i pacchetti e li allega a una GitHub Release
 scaricabile. Da **Actions** puoi anche avviare il workflow manualmente per
 verificare le build; in quel caso i pacchetti restano disponibili come artefatti
 temporanei per 14 giorni.
@@ -38,7 +45,7 @@ sono configurati automaticamente.
 Per rendere le release visibili a tutti, il repository GitHub deve essere
 pubblico. Se non hai ancora un repository, creane uno su GitHub, carica i file
 del progetto (il file `.gitignore` esclude i grandi file temporanei in `build`)
-e poi crea un tag, per esempio `v1.0.0`. Non caricare credenziali o certificati
+e poi crea un tag, per esempio `v1.0.3`. Non caricare credenziali o certificati
 nel repository.
 
 ## Privacy e verifiche
@@ -49,6 +56,9 @@ mostra una località predefinita errata: chiede di cercare una città. Le richie
 meteo e cartografiche accettano solo HTTPS verso i servizi previsti, non seguono
 redirect e limitano la dimensione delle risposte e delle immagini radar.
 Il nome scelto viene salvato nelle preferenze locali del sistema.
+Nel menu **Opzioni** si può scegliere tra tema scuro e tema chiaro; la scelta
+viene salvata nelle preferenze locali. Le caselle delle previsioni orarie
+mantengono una larghezza stabile anche quando restano poche ore disponibili.
 La mappa radar resta centrata sulla località cercata, con raggio fisso di 100 km;
 non si sposta con il mouse o con la rotella. Il livello di zoom delle tessere è
 limitato a quello supportato dal radar per evitare avvisi sovrapposti; i bordi
@@ -68,6 +78,18 @@ Su macOS la geolocalizzazione richiede il permesso “durante l'uso” per
 avviato come app macOS, così il sistema può mostrare correttamente la richiesta
 di autorizzazione; le coordinate di risposta vengono scambiate tramite un file
 temporaneo con permessi privati, poi rimosso.
+La sezione **Webcam** apre nel browser la mappa webcam di Windy centrata sulle
+coordinate della località cercata. MeteoBetti non scarica, incorpora o archivia
+le immagini: restano sul sito e soggette ai diritti e alle condizioni dei
+rispettivi gestori. La mappa esterna mostra l'attribuzione OpenStreetMap.
+La dashboard mostra sotto gli indicatori circolari le allerte attive del feed
+MeteoAlarm per la regione italiana della località cercata, con livello giallo,
+arancione o rosso secondo il bollettino ricevuto. La fonte è indicata come
+MeteoAlarm, con licenza CC BY 4.0; i dati regionali sono informativi e non
+sostituiscono le allerte ufficiali e le valutazioni d'impatto della Protezione
+Civile. L'indice AQI modellistico non viene trasformato in un'allerta. Se il
+servizio non fornisce la regione o il feed non è disponibile, l'app lo segnala
+invece di dichiarare che non ci sono allerte.
 
 Il workflow esegue anche controlli automatici su connessioni sicure, nomi salvati
 e dimensioni delle immagini prima di creare i pacchetti. Le azioni GitHub sono
