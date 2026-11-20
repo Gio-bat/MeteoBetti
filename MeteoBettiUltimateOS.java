@@ -125,14 +125,21 @@ public class MeteoBettiUltimateOS {
     protected static HourlyTimelineStrip hourlyTimelineStrip;
     protected static JTextField searchTextField;
     private static JPopupMenu locationSuggestionPopup;
+    private static JPanel locationSuggestionPopupContent;
+    private static JScrollPane locationSuggestionScroll;
+    private static JLabel locationSuggestionStatusLabel;
     private static DefaultListModel<GeoSuggestion> locationSuggestionModel;
     private static JList<GeoSuggestion> locationSuggestionList;
     private static Timer locationSuggestionTimer;
     private static final AtomicInteger locationSuggestionRequestId = new AtomicInteger();
     private static LocationSuggestionRequestToken activeLocationSuggestionRequest;
+    private static final AtomicInteger weatherFetchRequestId = new AtomicInteger();
     private static final int LOCATION_SUGGESTION_DEBOUNCE_MS = 120;
+    private static final String FONT_SCALE_PREFERENCE_KEY = "fontScale";
     protected static String customUserName = DEFAULT_USER_NAME;
     private static boolean lightTheme;
+    private static float uiFontScale = 1.0f;
+    private static boolean hasLoadedWeatherData;
     protected static AppNavBar appNavBar;
     protected static JLabel heroIconLabel;
     protected static String uiFontFamily;
@@ -194,6 +201,7 @@ public class MeteoBettiUltimateOS {
     public static void main(String[] args) {
         customUserName = loadUserName();
         lightTheme = loadLightTheme();
+        uiFontScale = loadFontScale();
         loadAppWallpaper(0);
         configureSwingThemeDefaults();
 
@@ -204,13 +212,16 @@ public class MeteoBettiUltimateOS {
                 rootWindow.setIconImage(new ImageIcon(appIconResource).getImage());
             }
             rootWindow.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+            rootWindow.getAccessibleContext().setAccessibleName("MeteoBetti");
+            rootWindow.getAccessibleContext().setAccessibleDescription(
+                    "Applicazione meteo. Usa Comando o Ctrl più F per cercare una località.");
             Rectangle screenBounds = GraphicsEnvironment.getLocalGraphicsEnvironment()
                     .getMaximumWindowBounds();
             int minimumWindowWidth = Math.min(560, screenBounds.width);
             int windowWidth = Math.max(minimumWindowWidth, screenBounds.width / 2);
             int windowHeight = Math.max(1, screenBounds.height);
             rootWindow.setMinimumSize(new Dimension(
-                    minimumWindowWidth, Math.min(600, windowHeight)));
+                    minimumWindowWidth, Math.min(480, windowHeight)));
             rootWindow.setSize(windowWidth, windowHeight);
             rootWindow.setLocation(
                     screenBounds.x + (screenBounds.width - windowWidth) / 2,
@@ -306,6 +317,18 @@ public class MeteoBettiUltimateOS {
             themeToggle.setSelected(lightTheme);
             themeToggle.addActionListener(event -> setLightTheme(themeToggle.isSelected()));
             discreetDropdownPanel.add(themeToggle);
+            JButton decreaseTextButton = new JButton("A-");
+            styleDiscreetButton(decreaseTextButton);
+            decreaseTextButton.setToolTipText("Riduci la dimensione del testo");
+            decreaseTextButton.getAccessibleContext().setAccessibleName("Riduci dimensione testo");
+            decreaseTextButton.addActionListener(event -> setUiFontScale(uiFontScale - 0.15f));
+            discreetDropdownPanel.add(decreaseTextButton);
+            JButton increaseTextButton = new JButton("A+");
+            styleDiscreetButton(increaseTextButton);
+            increaseTextButton.setToolTipText("Aumenta la dimensione del testo");
+            increaseTextButton.getAccessibleContext().setAccessibleName("Aumenta dimensione testo");
+            increaseTextButton.addActionListener(event -> setUiFontScale(uiFontScale + 0.15f));
+            discreetDropdownPanel.add(increaseTextButton);
 
             discreetMenuBtn.addActionListener(e -> {
                 isMenuVisible = !isMenuVisible;
@@ -326,10 +349,16 @@ public class MeteoBettiUltimateOS {
             searchTextField.setOpaque(false);
             searchTextField.setBorder(new EmptyBorder(10, 14, 10, 10));
             searchTextField.setToolTipText("Cerca comune (es. Roma, Milano, Alba)...");
+            searchTextField.getAccessibleContext().setAccessibleName("Cerca località");
+            searchTextField.getAccessibleContext().setAccessibleDescription(
+                    "Digita almeno due lettere. Usa freccia giù e freccia su per i suggerimenti, "
+                            + "Invio per cercare e Esc per chiudere l'elenco.");
             installLocationSuggestions();
 
             JButton searchBtn = new JButton("Cerca");
             styleDiscreetButton(searchBtn);
+            searchBtn.setToolTipText("Cerca la località digitata");
+            searchBtn.getAccessibleContext().setAccessibleName("Cerca località");
 
             JPanel searchGlass = createSearchGlassPanel();
             searchGlass.setLayout(new BorderLayout());
@@ -338,8 +367,20 @@ public class MeteoBettiUltimateOS {
             searchHint.setForeground(new Color(78, 104, 128));
             searchGlass.add(searchHint, BorderLayout.WEST);
             searchGlass.add(searchTextField, BorderLayout.CENTER);
+            searchTextField.addFocusListener(new java.awt.event.FocusAdapter() {
+                @Override
+                public void focusGained(java.awt.event.FocusEvent event) {
+                    searchGlass.repaint();
+                }
+
+                @Override
+                public void focusLost(java.awt.event.FocusEvent event) {
+                    searchGlass.repaint();
+                }
+            });
             searchRow.add(searchGlass, BorderLayout.CENTER);
             searchRow.add(searchBtn, BorderLayout.EAST);
+            installLocationSearchShortcut();
 
             topContainer.add(topBar);
             topContainer.add(discreetDropdownPanel);
@@ -373,12 +414,12 @@ public class MeteoBettiUltimateOS {
             new Timer(15 * 60 * 1000, e -> backgroundWrapperPanel.repaint()).start();
             new Timer(60 * 1000, e -> refreshDayNightAppearance()).start();
 
+            searchBtn.addActionListener(e -> performLocationSearch());
+            searchTextField.addActionListener(e -> performLocationSearch());
+
             beginStartupSplash(rootWindow);
             initPreciseLocationEngine(rootWindow);
             startupSplashWindow.setVisible(true);
-
-            searchBtn.addActionListener(e -> performLocationSearch());
-            searchTextField.addActionListener(e -> performLocationSearch());
         });
     }
 
@@ -394,7 +435,74 @@ public class MeteoBettiUltimateOS {
                 }
             }
         }
-        return new Font(uiFontFamily, style, Math.max(11, Math.round(size)));
+        return new Font(uiFontFamily, style,
+                Math.max(11, Math.round(size * uiFontScale)));
+    }
+
+    static float normalizeUiFontScale(float requestedScale) {
+        if (!Float.isFinite(requestedScale) || requestedScale < 1.075f) return 1.0f;
+        return requestedScale < 1.225f ? 1.15f : 1.3f;
+    }
+
+    private static float loadFontScale() {
+        try {
+            return normalizeUiFontScale((float) userPreferences()
+                    .getDouble(FONT_SCALE_PREFERENCE_KEY, 1.0));
+        } catch (SecurityException | IllegalStateException exception) {
+            System.err.println("Impossibile caricare la dimensione del testo: " + exception.getMessage());
+            return 1.0f;
+        }
+    }
+
+    private static void setUiFontScale(float requestedScale) {
+        float nextScale = normalizeUiFontScale(requestedScale);
+        if (nextScale == uiFontScale) return;
+        float scaleFactor = nextScale / uiFontScale;
+        uiFontScale = nextScale;
+        configureSwingThemeDefaults();
+        if (rootWindow != null) {
+            scaleComponentFonts(rootWindow, scaleFactor);
+            rootWindow.revalidate();
+            rootWindow.repaint();
+        }
+        try {
+            Preferences preferences = userPreferences();
+            preferences.putDouble(FONT_SCALE_PREFERENCE_KEY, nextScale);
+            preferences.flush();
+        } catch (BackingStoreException | SecurityException | IllegalStateException exception) {
+            System.err.println("Impossibile salvare la dimensione del testo: " + exception.getMessage());
+            JOptionPane.showMessageDialog(rootWindow,
+                    "La dimensione del testo è cambiata per questa sessione, "
+                            + "ma non è stato possibile salvarla.",
+                    "Preferenza non salvata", JOptionPane.WARNING_MESSAGE);
+        }
+    }
+
+    private static void scaleComponentFonts(Component component, float scaleFactor) {
+        Font font = component.getFont();
+        if (font != null) {
+            component.setFont(font.deriveFont(Math.max(11f, font.getSize2D() * scaleFactor)));
+        }
+        if (component instanceof Container) {
+            for (Component child : ((Container) component).getComponents()) {
+                scaleComponentFonts(child, scaleFactor);
+            }
+        }
+    }
+
+    private static void installLocationSearchShortcut() {
+        int shortcutMask = Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx();
+        InputMap inputMap = rootWindow.getRootPane()
+                .getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW);
+        ActionMap actionMap = rootWindow.getRootPane().getActionMap();
+        inputMap.put(KeyStroke.getKeyStroke(KeyEvent.VK_F, shortcutMask), "focus-location-search");
+        actionMap.put("focus-location-search", new AbstractAction() {
+            @Override
+            public void actionPerformed(java.awt.event.ActionEvent event) {
+                searchTextField.requestFocusInWindow();
+                searchTextField.selectAll();
+            }
+        });
     }
 
     private static void beginStartupSplash(JFrame owner) {
@@ -579,7 +687,9 @@ public class MeteoBettiUltimateOS {
         private StartupSplashWindow(JFrame owner) {
             super(owner, "MeteoBetti", Dialog.ModalityType.APPLICATION_MODAL);
             setUndecorated(true);
-            setBackground(lightTheme ? new Color(226, 239, 251) : new Color(8, 9, 11));
+            Color splashBackground = lightTheme
+                    ? new Color(226, 239, 251) : new Color(8, 9, 11);
+            setBackground(splashBackground);
             setDefaultCloseOperation(WindowConstants.DO_NOTHING_ON_CLOSE);
 
             JPanel content = new JPanel(new BorderLayout()) {
@@ -589,7 +699,7 @@ public class MeteoBettiUltimateOS {
                     Graphics2D g2 = (Graphics2D) graphics.create();
                     g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
                             RenderingHints.VALUE_ANTIALIAS_ON);
-                    g2.setColor(getBackground());
+                    g2.setColor(splashBackground);
                     g2.fillRect(0, 0, getWidth(), getHeight());
                     g2.setColor(lightTheme ? new Color(34, 58, 82, 30)
                             : new Color(0, 0, 0, 75));
@@ -608,7 +718,7 @@ public class MeteoBettiUltimateOS {
                 }
             };
             content.setOpaque(true);
-            content.setBackground(getBackground());
+            content.setBackground(splashBackground);
             content.setDoubleBuffered(true);
             content.setBorder(new EmptyBorder(25, 30, 22, 30));
             content.setLayout(new BoxLayout(content, BoxLayout.Y_AXIS));
@@ -836,6 +946,9 @@ public class MeteoBettiUltimateOS {
         locationSuggestionList = new JList<>(locationSuggestionModel);
         locationSuggestionList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
         locationSuggestionList.setFocusable(false);
+        locationSuggestionList.getAccessibleContext().setAccessibleName("Suggerimenti località");
+        locationSuggestionList.getAccessibleContext().setAccessibleDescription(
+                "Seleziona una località con le frecce e conferma con Invio.");
         locationSuggestionList.setFixedCellHeight(48);
         locationSuggestionList.setVisibleRowCount(6);
         locationSuggestionList.setFont(uiFont(Font.PLAIN, 13f));
@@ -873,25 +986,37 @@ public class MeteoBettiUltimateOS {
                 }
             }
         });
-        JScrollPane suggestionScroll = new JScrollPane(locationSuggestionList);
-        suggestionScroll.setFocusable(false);
-        suggestionScroll.setOpaque(false);
-        suggestionScroll.getViewport().setOpaque(false);
-        suggestionScroll.setBorder(BorderFactory.createEmptyBorder(1, 1, 1, 1));
-        suggestionScroll.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
-        suggestionScroll.setVerticalScrollBarPolicy(ScrollPaneConstants.VERTICAL_SCROLLBAR_NEVER);
+        locationSuggestionScroll = new JScrollPane(locationSuggestionList);
+        locationSuggestionScroll.setFocusable(false);
+        locationSuggestionScroll.setOpaque(false);
+        locationSuggestionScroll.getViewport().setOpaque(false);
+        locationSuggestionScroll.setBorder(BorderFactory.createEmptyBorder(1, 1, 1, 1));
+        locationSuggestionScroll.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
+        locationSuggestionScroll.setVerticalScrollBarPolicy(ScrollPaneConstants.VERTICAL_SCROLLBAR_NEVER);
+        locationSuggestionStatusLabel = new JLabel();
+        locationSuggestionStatusLabel.setFont(uiFont(Font.PLAIN, 11f));
+        locationSuggestionStatusLabel.setForeground(themeMutedTextColor());
+        locationSuggestionStatusLabel.setBorder(new EmptyBorder(10, 12, 10, 12));
+        locationSuggestionStatusLabel.setLabelFor(searchTextField);
+        locationSuggestionStatusLabel.getAccessibleContext().setAccessibleName("Stato della ricerca località");
+        locationSuggestionStatusLabel.setVisible(false);
+        locationSuggestionPopupContent = new JPanel(new BorderLayout());
+        locationSuggestionPopupContent.setOpaque(false);
+        locationSuggestionPopupContent.add(locationSuggestionScroll, BorderLayout.CENTER);
+        locationSuggestionPopupContent.add(locationSuggestionStatusLabel, BorderLayout.NORTH);
         locationSuggestionPopup = new JPopupMenu() {
             @Override
             protected void paintComponent(Graphics graphics) {
+                super.paintComponent(graphics);
                 Graphics2D g2 = (Graphics2D) graphics.create();
                 g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
                 int width = getWidth() - 1;
                 int height = getHeight() - 1;
                 g2.setPaint(lightTheme
-                        ? new GradientPaint(0, 0, new Color(255, 255, 255, 246),
-                                0, height, new Color(237, 244, 251, 246))
-                        : new GradientPaint(0, 0, new Color(83, 89, 100, 220),
-                                0, height, new Color(12, 15, 20, 238)));
+                        ? new GradientPaint(0, 0, new Color(255, 255, 255),
+                                0, height, new Color(237, 244, 251))
+                        : new GradientPaint(0, 0, new Color(43, 49, 58),
+                                0, height, new Color(20, 25, 33)));
                 g2.fillRoundRect(0, 0, width, height, 22, 22);
                 Shape previousClip = g2.getClip();
                 g2.clip(new java.awt.geom.RoundRectangle2D.Float(1, 1,
@@ -901,16 +1026,18 @@ public class MeteoBettiUltimateOS {
                         0, height / 2f, new Color(255, 255, 255, 0)));
                 g2.fillRect(0, 0, width, height / 2);
                 g2.setClip(previousClip);
-                paintGlassOutline(g2, 0, 0, width, height, 22);
+                g2.setColor(lightTheme ? new Color(100, 124, 149) : new Color(135, 153, 174));
+                g2.setStroke(new BasicStroke(1.25f));
+                g2.drawRoundRect(1, 1, Math.max(1, width - 2),
+                        Math.max(1, height - 2), 22, 22);
                 g2.dispose();
-                super.paintComponent(graphics);
             }
         };
         locationSuggestionPopup.setFocusable(false);
         locationSuggestionPopup.setRequestFocusEnabled(false);
         locationSuggestionPopup.setOpaque(false);
-        locationSuggestionPopup.setBorder(new EmptyBorder(1, 1, 1, 1));
-        locationSuggestionPopup.add(suggestionScroll);
+        locationSuggestionPopup.setBorder(new EmptyBorder(8, 8, 8, 8));
+        locationSuggestionPopup.add(locationSuggestionPopupContent);
 
         locationSuggestionTimer = new Timer(LOCATION_SUGGESTION_DEBOUNCE_MS, event -> requestLocationSuggestions(
                 searchTextField.getText().trim()));
@@ -934,13 +1061,15 @@ public class MeteoBettiUltimateOS {
         searchTextField.addKeyListener(new KeyAdapter() {
             @Override
             public void keyPressed(KeyEvent event) {
-                if (event.getKeyCode() == KeyEvent.VK_DOWN && locationSuggestionPopup.isVisible()) {
+                if (event.getKeyCode() == KeyEvent.VK_DOWN && locationSuggestionPopup.isVisible()
+                        && !locationSuggestionModel.isEmpty()) {
                     int next = Math.min(locationSuggestionList.getSelectedIndex() + 1,
                             locationSuggestionModel.size() - 1);
                     locationSuggestionList.setSelectedIndex(next);
                     locationSuggestionList.ensureIndexIsVisible(next);
                     event.consume();
-                } else if (event.getKeyCode() == KeyEvent.VK_UP && locationSuggestionPopup.isVisible()) {
+                } else if (event.getKeyCode() == KeyEvent.VK_UP && locationSuggestionPopup.isVisible()
+                        && !locationSuggestionModel.isEmpty()) {
                     int current = locationSuggestionList.getSelectedIndex();
                     if (current <= 0) {
                         locationSuggestionList.clearSelection();
@@ -974,6 +1103,7 @@ public class MeteoBettiUltimateOS {
             return;
         }
         locationSuggestionTimer.restart();
+        showLocationSuggestionStatus("Ricerca delle località in corso...");
     }
 
     static boolean shouldSelectLocationSuggestionOnEnter(boolean popupVisible,
@@ -1003,6 +1133,7 @@ public class MeteoBettiUltimateOS {
     private static void requestLocationSuggestions(String query) {
         if (query == null || query.codePointCount(0, query.length()) < 2
                 || !query.equals(searchTextField.getText().trim())) return;
+        showLocationSuggestionStatus("Ricerca delle località in corso...");
         int requestId = locationSuggestionRequestId.incrementAndGet();
         LocationSuggestionRequestToken requestToken = new LocationSuggestionRequestToken();
         activeLocationSuggestionRequest = requestToken;
@@ -1014,6 +1145,13 @@ public class MeteoBettiUltimateOS {
                 List<GeoSuggestion> suggestions = parseLocationSuggestions(
                         executeHttpGET(endpoint, requestToken, null, 2500, 2500));
                 if (suggestions.isEmpty()) {
+                    SwingUtilities.invokeLater(() -> {
+                        if (requestId == locationSuggestionRequestId.get()
+                                && searchTextField.getText().trim().equals(query)) {
+                            showLocationSuggestionStatus(
+                                    "Nessun risultato in Italia; cerco anche altrove...");
+                        }
+                    });
                     String worldwideEndpoint = "https://geocoding-api.open-meteo.com/v1/search?name="
                             + encoded + "&count=8&language=it&format=json";
                     suggestions = parseLocationSuggestions(
@@ -1037,7 +1175,8 @@ public class MeteoBettiUltimateOS {
                         if (activeLocationSuggestionRequest == requestToken) {
                             activeLocationSuggestionRequest = null;
                         }
-                        hideLocationSuggestions();
+                        showLocationSuggestionStatus(
+                                "Suggerimenti non disponibili. Premi Invio per cercare comunque.");
                     }
                 });
             }
@@ -1048,18 +1187,45 @@ public class MeteoBettiUltimateOS {
 
     private static void showLocationSuggestions(List<GeoSuggestion> suggestions) {
         locationSuggestionModel.clear();
+        if (suggestions.isEmpty()) {
+            showLocationSuggestionStatus(
+                    "Nessuna località trovata. Premi Invio per cercare il testo digitato.");
+            return;
+        }
         for (GeoSuggestion suggestion : suggestions) {
             locationSuggestionModel.addElement(suggestion);
         }
-        if (suggestions.isEmpty() || !searchTextField.isShowing()) {
+        if (!searchTextField.isShowing()) {
             hideLocationSuggestions();
             return;
         }
+        locationSuggestionStatusLabel.setVisible(false);
+        locationSuggestionScroll.setVisible(true);
         locationSuggestionList.clearSelection();
         int rows = Math.min(6, suggestions.size());
         int width = Math.max(300, searchTextField.getWidth());
-        locationSuggestionPopup.setPreferredSize(new Dimension(width, rows * 48));
+        locationSuggestionPopup.setPreferredSize(new Dimension(width, rows * 48 + 16));
+        locationSuggestionPopupContent.revalidate();
         locationSuggestionPopup.show(searchTextField, 0, searchTextField.getHeight());
+    }
+
+    private static void showLocationSuggestionStatus(String message) {
+        if (!SwingUtilities.isEventDispatchThread()) {
+            SwingUtilities.invokeLater(() -> showLocationSuggestionStatus(message));
+            return;
+        }
+        if (locationSuggestionStatusLabel == null || locationSuggestionPopup == null
+                || searchTextField == null) return;
+        locationSuggestionModel.clear();
+        locationSuggestionScroll.setVisible(false);
+        locationSuggestionStatusLabel.setText(message);
+        locationSuggestionStatusLabel.setVisible(true);
+        locationSuggestionPopupContent.revalidate();
+        int width = Math.max(300, searchTextField.getWidth());
+        locationSuggestionPopup.setPreferredSize(new Dimension(width, 62));
+        if (searchTextField.isShowing()) {
+            locationSuggestionPopup.show(searchTextField, 0, searchTextField.getHeight());
+        }
     }
 
     private static void hideLocationSuggestions() {
@@ -1274,8 +1440,12 @@ public class MeteoBettiUltimateOS {
     }
 
     private static void styleDiscreetButton(JButton btn) {
+        styleDiscreetButton(btn, false);
+    }
+
+    private static void styleDiscreetButton(JButton btn, boolean darkSurface) {
         btn.setFont(uiFont(Font.BOLD, 12f));
-        btn.setForeground(themePrimaryTextColor());
+        btn.setForeground(darkSurface ? Color.WHITE : themePrimaryTextColor());
         btn.setBackground(new Color(255, 255, 255, 18));
         btn.setOpaque(false);
         btn.setContentAreaFilled(false);
@@ -1291,17 +1461,27 @@ public class MeteoBettiUltimateOS {
                 g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
                 boolean pressed = button.getModel().isPressed();
                 boolean hovered = button.getModel().isRollover();
-                Color fill = lightTheme
-                        ? new Color(239, 246, 253, pressed ? 230 : hovered ? 215 : 188)
-                        : new Color(79, 91, 108, pressed ? 226 : hovered ? 203 : 176);
-                Color outline = lightTheme
-                        ? new Color(255, 255, 255, hovered ? 220 : 175)
-                        : new Color(231, 240, 250, hovered ? 180 : 108);
+                boolean focused = button.hasFocus();
+                Color fill = darkSurface
+                        ? (pressed ? new Color(45, 68, 92)
+                                : hovered ? new Color(69, 101, 135) : new Color(57, 83, 110))
+                        : lightTheme
+                                ? new Color(239, 246, 253, pressed ? 230 : hovered ? 215 : 188)
+                                : new Color(79, 91, 108, pressed ? 226 : hovered ? 203 : 176);
+                Color outline = darkSurface
+                        ? new Color(177, 205, 231, hovered || focused ? 245 : 210)
+                        : lightTheme
+                                ? new Color(255, 255, 255, hovered ? 220 : 175)
+                                : new Color(231, 240, 250, hovered ? 180 : 108);
                 g2.setColor(fill);
                 g2.fillRoundRect(x, y, width - 1, height - 1, 18, 18);
                 g2.setColor(outline);
-                g2.setStroke(new BasicStroke(1f));
+                g2.setStroke(new BasicStroke(focused ? 2.5f : 1f));
                 g2.drawRoundRect(x, y, width - 1, height - 1, 18, 18);
+                if (focused) {
+                    g2.setColor(lightTheme ? new Color(34, 111, 184) : new Color(134, 196, 255));
+                    g2.drawRoundRect(x + 1, y + 1, width - 3, height - 3, 17, 17);
+                }
                 g2.setColor(new Color(255, 255, 255, hovered ? 90 : 48));
                 g2.drawLine(x + 9, y + 1, x + width - 10, y + 1);
                 g2.dispose();
@@ -1351,13 +1531,33 @@ public class MeteoBettiUltimateOS {
 
             @Override
             protected ComboPopup createPopup() {
-                BasicComboPopup popup = new BasicComboPopup(comboBox);
-                popup.setOpaque(true);
-                popup.setBackground(menuColor);
-                popup.setBorder(BorderFactory.createCompoundBorder(
-                        BorderFactory.createLineBorder(lightTheme
-                                ? new Color(99, 119, 141, 100) : new Color(150, 164, 182, 90), 1, true),
-                        new EmptyBorder(3, 3, 3, 3)));
+                BasicComboPopup popup = new BasicComboPopup(comboBox) {
+                    @Override
+                    protected void paintComponent(Graphics graphics) {
+                        super.paintComponent(graphics);
+                        Graphics2D g2 = (Graphics2D) graphics.create();
+                        g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
+                                RenderingHints.VALUE_ANTIALIAS_ON);
+                        int width = getWidth() - 1;
+                        int height = getHeight() - 1;
+                        g2.setColor(menuColor);
+                        g2.fillRoundRect(0, 0, width, height, 18, 18);
+                        g2.setColor(lightTheme ? new Color(99, 119, 141)
+                                : new Color(150, 164, 182));
+                        g2.setStroke(new BasicStroke(1f));
+                        g2.drawRoundRect(0, 0, width, height, 18, 18);
+                        g2.dispose();
+                    }
+                };
+                popup.setOpaque(false);
+                popup.setBorder(new EmptyBorder(10, 10, 10, 10));
+                for (Component child : popup.getComponents()) {
+                    if (child instanceof JScrollPane scrollPane) {
+                        scrollPane.setOpaque(false);
+                        scrollPane.setBorder(null);
+                        scrollPane.getViewport().setOpaque(false);
+                    }
+                }
                 popup.getList().setBackground(menuColor);
                 popup.getList().setForeground(textColor);
                 return popup;
@@ -1394,6 +1594,12 @@ public class MeteoBettiUltimateOS {
                 g2.fillRect(0, 0, width, height / 2);
                 g2.setClip(previousClip);
                 paintGlassOutline(g2, 0, 0, width - 1, height - 1, 28);
+                if (searchTextField != null && searchTextField.hasFocus()) {
+                    g2.setColor(lightTheme ? new Color(34, 111, 184) : new Color(134, 196, 255));
+                    g2.setStroke(new BasicStroke(2.5f));
+                    g2.drawRoundRect(1, 1, Math.max(1, width - 3),
+                            Math.max(1, height - 3), 28, 28);
+                }
                 g2.dispose();
             }
         };
@@ -1473,6 +1679,9 @@ public class MeteoBettiUltimateOS {
         heroCard.setMaximumSize(new Dimension(520, 210));
         heroCard.setAlignmentX(Component.CENTER_ALIGNMENT);
         heroCard.setCursor(new Cursor(Cursor.HAND_CURSOR));
+        heroCard.setToolTipText("Apri i dettagli meteo della località");
+        heroCard.getAccessibleContext().setAccessibleDescription(
+                "Mostra i dettagli delle condizioni meteo attuali della località.");
 
         JLabel heroCardTitle = new JLabel("ADESSO");
         heroCardTitle.setFont(uiFont(Font.BOLD, 12f));
@@ -1501,7 +1710,7 @@ public class MeteoBettiUltimateOS {
         conditionTextLabel.setAlignmentX(Component.CENTER_ALIGNMENT);
 
         weatherSourceLabel = new JLabel("Fonte meteo: in attesa dei dati");
-        weatherSourceLabel.setFont(uiFont(Font.PLAIN, 10f));
+        weatherSourceLabel.setFont(uiFont(Font.PLAIN, 11f));
         weatherSourceLabel.setForeground(new Color(193, 205, 218));
         weatherSourceLabel.setAlignmentX(Component.CENTER_ALIGNMENT);
 
@@ -1515,7 +1724,7 @@ public class MeteoBettiUltimateOS {
         heroCard.add(Box.createVerticalStrut(4));
         heroCard.add(weatherSourceLabel);
 
-        heroCard.addMouseListener(new MouseAdapter() {
+        MouseAdapter openCurrentWeatherPopup = new MouseAdapter() {
             @Override
             public void mouseClicked(MouseEvent e) {
                 String countryText = stationCountry == null || stationCountry.isBlank()
@@ -1541,7 +1750,8 @@ public class MeteoBettiUltimateOS {
                                 humidityText, pressureText, windText, uvText, sourceNote,
                                 String.format(Locale.ITALIAN, "%.4f, %.4f", stationLat, stationLon)));
             }
-        });
+        };
+        installMouseListenerOnTree(heroCard, openCurrentWeatherPopup);
 
         JPanel timelineCard = createLiquidGlassCardPanel();
         timelineCard.setLayout(new BorderLayout(6, 8));
@@ -1747,6 +1957,76 @@ public class MeteoBettiUltimateOS {
         }
     }
 
+    private static void openDailyForecastPopup(DailyForecast forecast) {
+        openTelemetryPopup(rootWindow,
+                "Previsioni · " + capitalizeForecastDate(forecast.displayDate()),
+                buildDailyForecastPopup(forecast));
+    }
+
+    private static void installMouseListenerOnTree(Container container, MouseAdapter listener) {
+        container.addMouseListener(listener);
+        container.setCursor(new Cursor(Cursor.HAND_CURSOR));
+        for (Component child : container.getComponents()) {
+            if (child instanceof Container childContainer) {
+                installMouseListenerOnTree(childContainer, listener);
+            } else {
+                child.addMouseListener(listener);
+                child.setCursor(new Cursor(Cursor.HAND_CURSOR));
+            }
+        }
+    }
+
+    private static String capitalizeForecastDate(String text) {
+        if (text.isEmpty()) return text;
+        return text.substring(0, 1).toUpperCase(Locale.ITALIAN) + text.substring(1);
+    }
+
+    private static JPanel buildDailyForecastPopup(DailyForecast forecast) {
+        JPanel content = new JPanel();
+        content.setOpaque(false);
+        content.setLayout(new BoxLayout(content, BoxLayout.Y_AXIS));
+
+        JLabel condition = new JLabel(forecast.weatherDescription(),
+                new WeatherIcon(forecast.weatherCode, 28), SwingConstants.LEFT);
+        condition.setFont(uiFont(Font.BOLD, 14f));
+        condition.setForeground(popupPrimaryTextColor());
+        condition.setAlignmentX(Component.LEFT_ALIGNMENT);
+        content.add(condition);
+        content.add(Box.createVerticalStrut(12));
+
+        JPanel metrics = new JPanel(new GridLayout(0, 2, 9, 9));
+        metrics.setOpaque(false);
+        metrics.setAlignmentX(Component.LEFT_ALIGNMENT);
+        metrics.setPreferredSize(new Dimension(360, 126));
+        metrics.setMaximumSize(new Dimension(380, 126));
+        metrics.add(createPopupMetricCard("Temperatura media",
+                formatDailyForecastMetric(forecast.meanTemperature, "%.1f °C"),
+                "temperature", new Color(232, 137, 66)));
+        metrics.add(createPopupMetricCard("Prob. pioggia max",
+                formatDailyForecastMetric(forecast.precipitationProbability, "%.0f%%"),
+                "humidity", new Color(69, 164, 206)));
+        metrics.add(createPopupMetricCard("Vento medio",
+                formatDailyForecastMetric(forecast.meanWindSpeed, "%.1f km/h"),
+                "wind", new Color(70, 166, 131)));
+        metrics.add(createPopupMetricCard("Indice UV massimo",
+                formatDailyForecastMetric(forecast.uvIndexMax, "%.1f UV"),
+                "uv", new Color(220, 172, 57)));
+        content.add(metrics);
+        content.add(Box.createVerticalStrut(12));
+        content.add(createPopupNote("DETTAGLIO",
+                "Valori riferiti a " + forecast.displayDate()
+                        + ": temperatura e vento medi, probabilità massima di precipitazione "
+                        + "e indice UV massimo."));
+        content.add(Box.createVerticalStrut(7));
+        content.add(createPopupNote("FONTE", weatherSourceStatusText));
+        return content;
+    }
+
+    static String formatDailyForecastMetric(double value, String format) {
+        return Double.isFinite(value)
+                ? String.format(Locale.ITALIAN, format, value) : "N/D";
+    }
+
     private static void openDailyDetail(DailyForecast forecast) {
         if (dailyDetailPanel == null || mainCardContainer == null) return;
         dailyDetailPanel.showForecast(forecast);
@@ -1755,6 +2035,7 @@ public class MeteoBettiUltimateOS {
     }
 
     static class DailyDetailPanel extends JPanel {
+        private final JLabel locationLabel = new JLabel("Località");
         private final JLabel dateLabel = new JLabel("Dettaglio giornaliero");
         private final JLabel temperatureLabel = new JLabel("--°");
         private final JLabel conditionLabel = new JLabel("Seleziona un giorno dalla previsione");
@@ -1782,6 +2063,14 @@ public class MeteoBettiUltimateOS {
             hero.setBorder(new EmptyBorder(18, 18, 18, 18));
             hero.setMaximumSize(new Dimension(520, 188));
             hero.setAlignmentX(Component.CENTER_ALIGNMENT);
+            hero.setCursor(new Cursor(Cursor.HAND_CURSOR));
+            hero.setToolTipText("Apri il riepilogo meteo previsto per questa località e giornata");
+            hero.getAccessibleContext().setAccessibleName("Riepilogo meteo giornaliero");
+            hero.getAccessibleContext().setAccessibleDescription(
+                    "Mostra i dettagli delle previsioni per la località e il giorno selezionati.");
+            locationLabel.setFont(uiFont(Font.BOLD, 13f));
+            locationLabel.setForeground(new Color(218, 226, 236));
+            locationLabel.setAlignmentX(Component.CENTER_ALIGNMENT);
             dateLabel.setFont(uiFont(Font.BOLD, 18f));
             dateLabel.setForeground(new Color(31, 57, 78));
             dateLabel.setAlignmentX(Component.CENTER_ALIGNMENT);
@@ -1794,12 +2083,21 @@ public class MeteoBettiUltimateOS {
             summaryLabel.setFont(uiFont(Font.PLAIN, 12f));
             summaryLabel.setForeground(new Color(198, 207, 218));
             summaryLabel.setAlignmentX(Component.CENTER_ALIGNMENT);
+            hero.add(locationLabel);
+            hero.add(Box.createVerticalStrut(5));
             hero.add(dateLabel);
             hero.add(Box.createVerticalStrut(4));
             hero.add(temperatureLabel);
             hero.add(conditionLabel);
             hero.add(Box.createVerticalStrut(5));
             hero.add(summaryLabel);
+            MouseAdapter openSelectedDayPopup = new MouseAdapter() {
+                @Override
+                public void mouseClicked(MouseEvent event) {
+                    if (selectedForecast != null) openDailyForecastPopup(selectedForecast);
+                }
+            };
+            installMouseListenerOnTree(hero, openSelectedDayPopup);
             add(hero);
             add(Box.createVerticalStrut(12));
 
@@ -1836,7 +2134,10 @@ public class MeteoBettiUltimateOS {
 
         void showForecast(DailyForecast forecast) {
             selectedForecast = forecast;
-            dateLabel.setText(capitalize(forecast.displayDate()));
+            String location = stationCountry == null || stationCountry.isBlank()
+                    ? stationCity : stationCity + ", " + stationCountry;
+            locationLabel.setText("<html>" + escapeHtml(location) + "</html>");
+            dateLabel.setText(capitalizeForecastDate(forecast.displayDate()));
             temperatureLabel.setText(Double.isFinite(forecast.meanTemperature)
                     ? String.format(Locale.ITALIAN, "%.1f°", forecast.meanTemperature) : "--°");
             conditionLabel.setText(forecast.weatherDescription());
@@ -1855,10 +2156,6 @@ public class MeteoBettiUltimateOS {
             if (selectedForecast != null) showForecast(selectedForecast);
         }
 
-        private String capitalize(String text) {
-            if (text.isEmpty()) return text;
-            return text.substring(0, 1).toUpperCase(Locale.ITALIAN) + text.substring(1);
-        }
     }
 
     static class DailyDetailChartsPanel extends JPanel {
@@ -2406,11 +2703,12 @@ public class MeteoBettiUltimateOS {
         int requestId = weatherAlertRequestId.incrementAndGet();
         String normalizedCountry = normalizeAlertText(country);
         if (!normalizedCountry.equals("italia") && !normalizedCountry.equals("italy")) {
-            weatherAlertsPanel.showUnavailable("Bollettini regionali disponibili solo per l'Italia.");
+            weatherAlertsPanel.showUnavailable(region,
+                    "I bollettini regionali sono disponibili solo per località in Italia.");
             return;
         }
         if (region == null || region.isBlank()) {
-            weatherAlertsPanel.showUnavailable(
+            weatherAlertsPanel.showUnavailable(null,
                     "Regione non determinata per questa posizione. Cerca una città per consultare le allerte.");
             return;
         }
@@ -2429,8 +2727,8 @@ public class MeteoBettiUltimateOS {
                 System.err.println("Allerte MeteoAlarm non disponibili: " + exception.getMessage());
                 SwingUtilities.invokeLater(() -> {
                     if (requestId == weatherAlertRequestId.get()) {
-                        weatherAlertsPanel.showUnavailable(
-                                "Non è stato possibile aggiornare le allerte. Riprova più tardi.");
+                        weatherAlertsPanel.showUnavailable(region,
+                                weatherAlertFeedErrorMessage(region) + " Riprova più tardi.");
                     }
                 });
             }
@@ -2463,7 +2761,8 @@ public class MeteoBettiUltimateOS {
             statusLabel.setFont(uiFont(Font.PLAIN, 12f));
             statusLabel.setForeground(themeMutedTextColor());
             statusLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
-            attributionLabel.setFont(uiFont(Font.PLAIN, 10f));
+            statusLabel.getAccessibleContext().setAccessibleName("Stato delle allerte meteo");
+            attributionLabel.setFont(uiFont(Font.PLAIN, 11f));
             attributionLabel.setForeground(themeMutedTextColor());
             attributionLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
 
@@ -2485,15 +2784,23 @@ public class MeteoBettiUltimateOS {
         }
 
         private void showLoading(String region) {
-            titleLabel.setText("ALLERTE SEGNALATE · " + region);
-            statusLabel.setText("Controllo gli avvisi pubblicati per la regione...");
+            titleLabel.setText(weatherAlertTitle(region));
+            statusLabel.setText("Controllo gli avvisi attivi pubblicati per questa regione...");
             alertList.removeAll();
             revalidate();
             repaint();
         }
 
-        private void showUnavailable(String message) {
-            titleLabel.setText("ALLERTE SEGNALATE");
+        private void showPreparing() {
+            titleLabel.setText(weatherAlertTitle(null));
+            statusLabel.setText("In attesa della nuova località per verificare le allerte...");
+            alertList.removeAll();
+            revalidate();
+            repaint();
+        }
+
+        private void showUnavailable(String region, String message) {
+            titleLabel.setText(weatherAlertTitle(region));
             statusLabel.setText(message);
             alertList.removeAll();
             revalidate();
@@ -2501,10 +2808,10 @@ public class MeteoBettiUltimateOS {
         }
 
         private void showAlerts(String region, List<WeatherAlert> alerts) {
-            titleLabel.setText("ALLERTE SEGNALATE · " + region);
+            titleLabel.setText(weatherAlertTitle(region));
             alertList.removeAll();
             if (alerts.isEmpty()) {
-                statusLabel.setText("Nessuna allerta attiva segnalata nella regione.");
+                statusLabel.setText(weatherAlertEmptyMessage(region));
             } else {
                 statusLabel.setText(alerts.size() == 1
                         ? "È stata segnalata 1 allerta:"
@@ -2528,7 +2835,7 @@ public class MeteoBettiUltimateOS {
             setLayout(new BorderLayout(10, 0));
             setBorder(new EmptyBorder(8, 11, 8, 8));
             JLabel levelLabel = new JLabel(alert.severityLabel);
-            levelLabel.setFont(uiFont(Font.BOLD, 9f));
+            levelLabel.setFont(uiFont(Font.BOLD, 10f));
             levelLabel.setForeground(weatherAlertSeverityTextColor(alert.severityLevel));
             levelLabel.putClientProperty(ALERT_SEVERITY_PROPERTY, alert.severityLevel);
             levelLabel.setOpaque(lightTheme && alert.severityLevel == 1);
@@ -2540,7 +2847,7 @@ public class MeteoBettiUltimateOS {
             eventLabel.setFont(uiFont(Font.BOLD, 12f));
             eventLabel.setForeground(themePrimaryTextColor());
             JLabel detailsLabel = new JLabel(formatAlertTime(alert.onset, alert.expires));
-            detailsLabel.setFont(uiFont(Font.PLAIN, 10f));
+            detailsLabel.setFont(uiFont(Font.PLAIN, 11f));
             detailsLabel.setForeground(themeMutedTextColor());
 
             JPanel text = new JPanel();
@@ -3914,9 +4221,8 @@ public class MeteoBettiUltimateOS {
         private BufferedImage mapImage;
 
         private RadarMapCanvas() {
-            setOpaque(true);
+            setOpaque(false);
             setDoubleBuffered(true);
-            setBackground(new Color(22, 27, 34));
             setPreferredSize(new Dimension(460, 390));
         }
 
@@ -4371,11 +4677,7 @@ public class MeteoBettiUltimateOS {
     }
 
     private static void loadAppWallpaper(int weatherCode, boolean night) {
-        String daytimeFileName = wallpaperFileName(weatherCode);
-        String[] candidates = night
-                ? new String[]{wallpaperFileName(weatherCode, true), daytimeFileName}
-                : new String[]{daytimeFileName};
-        for (String fileName : candidates) {
+        for (String fileName : wallpaperFileCandidates(weatherCode, night)) {
             try {
                 Image wallpaper = readWallpaperImage(fileName);
                 if (wallpaper != null) {
@@ -4395,6 +4697,16 @@ public class MeteoBettiUltimateOS {
             System.err.println("Impossibile caricare lo sfondo predefinito: " + ex.getMessage());
             currentWallpaperImage = null;
         }
+    }
+
+    static List<String> wallpaperFileCandidates(int weatherCode, boolean night) {
+        String daytimeFileName = wallpaperFileName(weatherCode);
+        if (!night) return List.of(daytimeFileName);
+        String nightFileName = wallpaperFileName(weatherCode, true);
+        if (weatherCode == 0) {
+            return List.of(nightFileName, "sfondo_notte_sereno.jpg", daytimeFileName);
+        }
+        return List.of(nightFileName, daytimeFileName);
     }
 
     private static Image readWallpaperImage(String fileName) throws IOException {
@@ -4467,6 +4779,7 @@ public class MeteoBettiUltimateOS {
     }
 
     private static void executeAsyncWeatherFetch(JFrame parentFrame, String queryLocation) {
+        int requestId = beginWeatherFetch(true);
         new Thread(() -> {
             try {
                 String searchQuery = queryLocation.toLowerCase().contains("italy") || queryLocation.toLowerCase().contains("italia")
@@ -4475,70 +4788,119 @@ public class MeteoBettiUltimateOS {
                 String geoUrl = "https://geocoding-api.open-meteo.com/v1/search?name=" + encoded + "&count=1&language=it&format=json";
                 String geoJson = executeHttpGET(geoUrl);
 
-                if (!geoJson.contains("\"results\":")) {
+                if (parseLocationSuggestions(geoJson).isEmpty()) {
                     encoded = URLEncoder.encode(queryLocation, StandardCharsets.UTF_8.name());
                     geoUrl = "https://geocoding-api.open-meteo.com/v1/search?name=" + encoded + "&count=1&language=it&format=json";
                     geoJson = executeHttpGET(geoUrl);
 
-                    if (!geoJson.contains("\"results\":")) {
-                        SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(
-                                parentFrame, "❌ Località non trovata nei server Open-Meteo!",
-                                "Errore Ricerca", JOptionPane.ERROR_MESSAGE));
+                    if (parseLocationSuggestions(geoJson).isEmpty()) {
+                        showWeatherFetchError(parentFrame,
+                                "Località non trovata nei server Open-Meteo.", requestId,
+                                "Località non trovata");
                         return;
                     }
                 }
 
-                double lat = parseJsonNumber(geoJson, "\"latitude\":");
-                double lon = parseJsonNumber(geoJson, "\"longitude\":");
-                String name = parseJsonString(geoJson, "name");
-                String country = parseJsonString(geoJson, "country");
-                String admin1 = parseJsonString(geoJson, "admin1");
-                fetchWeatherAndUpdate(parentFrame, lat, lon, name, country, admin1);
+                GeoSuggestion location = parseLocationSuggestions(geoJson).get(0);
+                fetchWeatherAndUpdate(parentFrame, location.latitude, location.longitude,
+                        location.name, location.country, location.admin1, requestId);
 
             } catch (Exception ex) {
                 System.err.println("Download meteo non riuscito: " + ex.getMessage());
-                showWeatherFetchError(parentFrame, "Impossibile scaricare i dati meteo.", ex);
+                showWeatherFetchError(parentFrame, "Impossibile scaricare i dati meteo.", ex, requestId);
             }
         }).start();
     }
 
     private static void executeAsyncWeatherFetch(JFrame parentFrame, LocationFix locationFix) {
+        int requestId = beginWeatherFetch(false);
         new Thread(() -> {
             try {
                 String city = locationFix.city.isEmpty() ? "Posizione attuale" : locationFix.city;
                 String country = locationFix.country.isEmpty() ? "" : locationFix.country;
                 fetchWeatherAndUpdate(parentFrame, locationFix.latitude, locationFix.longitude,
-                        city, country, locationFix.admin1);
+                        city, country, locationFix.admin1, requestId);
             } catch (Exception ex) {
                 System.err.println("Download meteo per posizione non riuscito: " + ex.getMessage());
                 showWeatherFetchError(parentFrame,
-                        "Impossibile scaricare i dati meteo per la posizione rilevata.", ex);
+                        "Impossibile scaricare i dati meteo per la posizione rilevata.", ex, requestId);
             }
         }).start();
     }
 
-    private static void showWeatherFetchError(JFrame parentFrame, String message, Exception error) {
-        String details = error.getMessage();
-        if (details == null || details.isBlank()) details = error.getClass().getSimpleName();
+    private static int beginWeatherFetch(boolean resolveLocation) {
+        int requestId = weatherFetchRequestId.incrementAndGet();
+        SwingUtilities.invokeLater(() -> {
+            if (requestId != weatherFetchRequestId.get()) return;
+            if (conditionTextLabel != null) {
+                conditionTextLabel.setText(resolveLocation
+                        ? "Ricerca località e aggiornamento meteo in corso..."
+                        : "Aggiornamento meteo della posizione in corso...");
+            }
+            if (weatherSourceLabel != null && !hasLoadedWeatherData) {
+                weatherSourceLabel.setText("Fonte meteo: ricerca in corso...");
+            }
+            if (weatherAlertsPanel != null) {
+                weatherAlertRequestId.incrementAndGet();
+                weatherAlertsPanel.showPreparing();
+            }
+        });
+        return requestId;
+    }
+
+    private static void showWeatherFetchError(JFrame parentFrame, String message, int requestId) {
+        showWeatherFetchError(parentFrame, message, null, requestId, "Errore di rete");
+    }
+
+    private static void showWeatherFetchError(JFrame parentFrame, String message, int requestId,
+                                              String dialogTitle) {
+        showWeatherFetchError(parentFrame, message, null, requestId, dialogTitle);
+    }
+
+    private static void showWeatherFetchError(JFrame parentFrame, String message, Exception error,
+                                              int requestId) {
+        showWeatherFetchError(parentFrame, message, error, requestId, "Errore di rete");
+    }
+
+    private static void showWeatherFetchError(JFrame parentFrame, String message, Exception error,
+                                              int requestId, String dialogTitle) {
+        String details = error == null ? "" : error.getMessage();
+        if ((details == null || details.isBlank()) && error != null) {
+            details = error.getClass().getSimpleName();
+        }
         if (details.length() > 240) details = details.substring(0, 240) + "...";
         String finalDetails = details;
         SwingUtilities.invokeLater(() -> {
+            if (requestId != weatherFetchRequestId.get()) return;
             finishStartupSplash();
-            if (mainLocationDisplayLabel != null) {
+            if (!hasLoadedWeatherData && mainLocationDisplayLabel != null) {
                 mainLocationDisplayLabel.setText("Dati meteo non disponibili");
             }
-            if (weatherSourceLabel != null) {
+            if (!hasLoadedWeatherData && weatherSourceLabel != null) {
                 weatherSourceLabel.setText("Fonte meteo: dati non disponibili");
                 weatherSourceStatusText = "Fonte meteo: dati non disponibili";
             }
+            if (conditionTextLabel != null) {
+                conditionTextLabel.setText(hasLoadedWeatherData
+                        ? "Aggiornamento non riuscito · sono mostrati gli ultimi dati ricevuti"
+                        : dialogTitle.equals("Località non trovata")
+                                ? message : "Meteo non disponibile · controlla la connessione e riprova");
+            }
+            if (weatherAlertsPanel != null) {
+                weatherAlertsPanel.showUnavailable(null,
+                        "La ricerca non è riuscita: le allerte non sono state aggiornate.");
+            }
+            String dialogMessage = finalDetails.isBlank()
+                    ? message : message + "\n" + finalDetails;
             JOptionPane.showMessageDialog(parentFrame,
-                    message + "\n" + finalDetails, "Errore di Rete", JOptionPane.ERROR_MESSAGE);
+                    dialogMessage, dialogTitle, JOptionPane.ERROR_MESSAGE);
         });
     }
 
     private static void fetchWeatherAndUpdate(JFrame parentFrame, double lat, double lon,
-                                              String name, String country, String admin1)
+                                              String name, String country, String admin1, int requestId)
             throws Exception {
+        if (requestId != weatherFetchRequestId.get()) return;
         if (!Double.isFinite(lat) || lat < -90 || lat > 90
                 || !Double.isFinite(lon) || lon < -180 || lon > 180) {
             throw new IllegalArgumentException("Coordinate geografiche non valide");
@@ -4738,40 +5100,44 @@ public class MeteoBettiUltimateOS {
                             ? Math.round(hourlyWinds[hourIndex]) + " km/h" : "N/D"
             };
         }
-        stationCity = name;
-        stationCountry = country;
-        stationLat = lat;
-        stationLon = lon;
-        stationWeatherCode = wCode;
-        stationIsNight = currentIsNight;
-        stationTimezone = forecastTimezone;
-        stationTemp = t;
-        stationApparentTemp = appT;
-        stationHumidity = hum;
-        stationPressure = press;
-        stationWindSpeed = rawWind;
-        stationUvIndex = uvMax;
         final String selectedDataSource = dataSource;
-        final String selectedSourceStatus = weatherSourceStatus(
-                selectedDataSource, integratedFields, supplementUnavailable,
-                hasMissingValues(hourlyPrecipitation) || hasMissingValues(dailyPrecipitation));
-        weatherDataSourceName = selectedDataSource;
-        weatherSourceStatusText = selectedSourceStatus;
+        final String selectedSourceStatus = weatherSourceStatusWithUpdateTime(
+                weatherSourceStatus(selectedDataSource, integratedFields, supplementUnavailable,
+                        hasMissingValues(hourlyPrecipitation) || hasMissingValues(dailyPrecipitation)),
+                Instant.now(), forecastTimezone);
         final double selectedTemperature = t;
         final double selectedApparentTemperature = appT;
         final double selectedHumidity = hum;
         final double selectedPressure = press;
+        final double selectedWindSpeed = rawWind;
         final double selectedUvMax = uvMax;
 
         String desc = resolveDescription(wCode);
-        loadAppWallpaper(wCode, currentIsNight);
 
         SwingUtilities.invokeLater(() -> {
+            if (requestId != weatherFetchRequestId.get()) return;
+            stationCity = name;
+            stationCountry = country;
+            stationLat = lat;
+            stationLon = lon;
+            stationWeatherCode = wCode;
+            stationIsNight = currentIsNight;
+            stationTimezone = forecastTimezone;
+            stationTemp = selectedTemperature;
+            stationApparentTemp = selectedApparentTemperature;
+            stationHumidity = selectedHumidity;
+            stationPressure = selectedPressure;
+            stationWindSpeed = selectedWindSpeed;
+            stationUvIndex = selectedUvMax;
+            weatherDataSourceName = selectedDataSource;
+            weatherSourceStatusText = selectedSourceStatus;
+            hasLoadedWeatherData = true;
+            loadAppWallpaper(wCode, currentIsNight);
             forecastRowNightFlags = currentForecastNightFlags;
             mainLocationDisplayLabel.setText(country.isEmpty() ? name : name + ", " + country);
             if (webcamPage != null) webcamPage.updateLocation(name, country, lat, lon);
             if (weatherSourceLabel != null) {
-                weatherSourceLabel.setText("<html><div style='width:320px;text-align:center;'>"
+                weatherSourceLabel.setText("<html><div style='width:460px;text-align:center;'>"
                         + escapeHtml(selectedSourceStatus) + "</div></html>");
             }
             mainTempDisplayLabel.setText(Double.isFinite(selectedTemperature)
@@ -4854,6 +5220,41 @@ public class MeteoBettiUltimateOS {
             status += " · probabilità pioggia N/D (MET Norway non la fornisce)";
         }
         return status;
+    }
+
+    static String weatherSourceStatusWithUpdateTime(String status, Instant updatedAt,
+                                                    String timezone) {
+        ZoneId zone = ZoneId.systemDefault();
+        if (timezone != null && !timezone.isBlank()) {
+            try {
+                zone = ZoneId.of(timezone);
+            } catch (java.time.DateTimeException exception) {
+                System.err.println("Fuso orario meteo non valido per l'aggiornamento: "
+                        + exception.getMessage());
+            }
+        }
+        Instant timestamp = updatedAt == null ? Instant.now() : updatedAt;
+        String time = DateTimeFormatter.ofPattern("HH:mm", Locale.ITALIAN)
+                .format(timestamp.atZone(zone));
+        String sourceStatus = status == null || status.isBlank()
+                ? "Fonte meteo: non disponibile" : status;
+        return sourceStatus + " · aggiornato alle " + time;
+    }
+
+    static String weatherAlertTitle(String region) {
+        return region == null || region.isBlank()
+                ? "ALLERTE SEGNALATE" : "ALLERTE SEGNALATE · " + region;
+    }
+
+    static String weatherAlertEmptyMessage(String region) {
+        return "Il feed MeteoAlarm non riporta allerte attive"
+                + (region == null || region.isBlank() ? "." : " per " + region + ".");
+    }
+
+    static String weatherAlertFeedErrorMessage(String region) {
+        return "Impossibile aggiornare il feed MeteoAlarm"
+                + (region == null || region.isBlank() ? "." : " per " + region + ".")
+                + " L'assenza di avvisi non è confermata.";
     }
 
     private static double[] parseForecastValues(String jsonBlock, String key, String[] times) {
@@ -5979,8 +6380,10 @@ public class MeteoBettiUltimateOS {
         styleScrollBar(scroll.getVerticalScrollBar());
 
         JButton closeBtn = new JButton("Chiudi");
-        styleDiscreetButton(closeBtn);
+        styleDiscreetButton(closeBtn, true);
         closeBtn.setFont(uiFont(Font.BOLD, 12f));
+        closeBtn.setToolTipText("Chiudi questa finestra");
+        closeBtn.getAccessibleContext().setAccessibleName("Chiudi finestra");
         closeBtn.addActionListener(e -> dialog.dispose());
         dialog.getRootPane().setDefaultButton(closeBtn);
         dialog.getRootPane().registerKeyboardAction(event -> dialog.dispose(),

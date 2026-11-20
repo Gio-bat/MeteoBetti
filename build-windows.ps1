@@ -37,6 +37,7 @@ $JarPath = Join-Path $InputDir "$AppName.jar"
 if ($LASTEXITCODE -ne 0) { throw "Creazione del JAR non riuscita." }
 foreach ($wallpaper in @(
     "sfondo_notte_sole.jpg",
+    "sfondo_notte_sereno.jpg",
     "sfondo_notte_nuvoloso.jpg",
     "sfondo_notte_pioggia.jpg",
     "sfondo_notte.jpg"

@@ -24,7 +24,7 @@ jar --create --file "$BUILD_ROOT/input/$APP_NAME.jar" \
     -C "$ROOT" sfondo_pioggia.jpg \
     -C "$ROOT" sfondo_nuvoloso.jpg \
     -C "$ROOT/icons" meteo-betti-icon.png
-for wallpaper in sfondo_notte_sole.jpg sfondo_notte_nuvoloso.jpg sfondo_notte_pioggia.jpg sfondo_notte.jpg; do
+for wallpaper in sfondo_notte_sole.jpg sfondo_notte_sereno.jpg sfondo_notte_nuvoloso.jpg sfondo_notte_pioggia.jpg sfondo_notte.jpg; do
     if [[ -f "$ROOT/$wallpaper" ]]; then
         jar --update --file "$BUILD_ROOT/input/$APP_NAME.jar" -C "$ROOT" "$wallpaper"
     fi

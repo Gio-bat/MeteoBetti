@@ -2,6 +2,7 @@ import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.util.List;
 import java.util.UUID;
 import java.util.prefs.Preferences;
 
@@ -14,6 +15,9 @@ public final class MeteoBettiSecurityChecks {
         verifyThemePreferenceHandling();
         verifyStartupSplashMinimumDuration();
         verifyLocationSuggestionEnterBehavior();
+        verifyWeatherUpdateAndAlertStatus();
+        verifyAccessibleTextSizing();
+        verifyDailyForecastPopupValues();
         verifyHourlyTimelineKeepsFiveFixedCells();
         verifyWeatherWallpaperSelection();
         verifyWindyWebcamLink();
@@ -208,6 +212,11 @@ public final class MeteoBettiSecurityChecks {
                         && MeteoBettiUltimateOS.wallpaperFileName(3, true).equals("sfondo_notte_nuvoloso.jpg")
                         && MeteoBettiUltimateOS.wallpaperFileName(61, true).equals("sfondo_notte_pioggia.jpg"),
                 "La notte deve selezionare gli sfondi notturni con i tag corretti");
+        check(MeteoBettiUltimateOS.wallpaperFileCandidates(0, true)
+                        .contains("sfondo_notte_sereno.jpg")
+                        && MeteoBettiUltimateOS.wallpaperFileCandidates(61, true)
+                        .equals(List.of("sfondo_notte_pioggia.jpg", "sfondo_pioggia.jpg")),
+                "La ricerca deve usare anche il nome alternativo dello sfondo sereno notturno");
         check(MeteoBettiUltimateOS.wallpaperFileName(0, false).equals("sfondo_sole.jpg"),
                 "Di giorno gli sfondi esistenti devono restare invariati");
         check(!MeteoBettiUltimateOS.isNightAt("2026-06-21T12:00", "Europe/Rome",
@@ -338,6 +347,47 @@ public final class MeteoBettiSecurityChecks {
                         && !MeteoBettiUltimateOS.shouldSelectLocationSuggestionOnEnter(false, 0, 3)
                         && !MeteoBettiUltimateOS.shouldSelectLocationSuggestionOnEnter(true, 3, 3),
                 "Invio senza una selezione valida deve cercare il testo digitato");
+    }
+
+    private static void verifyWeatherUpdateAndAlertStatus() {
+        String updatedStatus = MeteoBettiUltimateOS.weatherSourceStatusWithUpdateTime(
+                "Fonte meteo: Open-Meteo",
+                java.time.Instant.parse("2026-11-13T06:00:00Z"),
+                "Europe/Rome");
+        check(updatedStatus.equals("Fonte meteo: Open-Meteo · aggiornato alle 07:00"),
+                "La fonte meteo deve includere l'ora di aggiornamento locale");
+        check(MeteoBettiUltimateOS.weatherAlertTitle("Piemonte")
+                        .contains("Piemonte")
+                        && MeteoBettiUltimateOS.weatherAlertEmptyMessage("Piemonte")
+                        .contains("Piemonte")
+                        && !MeteoBettiUltimateOS.weatherAlertEmptyMessage("Piemonte")
+                        .equals(MeteoBettiUltimateOS.weatherAlertFeedErrorMessage("Piemonte")),
+                "Le allerte devono mantenere la regione e distinguere assenza da errore del feed");
+        check(MeteoBettiUltimateOS.weatherAlertFeedErrorMessage("Piemonte")
+                        .contains("assenza di avvisi non è confermata"),
+                "Un errore del feed non deve sembrare una conferma di assenza di allerte");
+    }
+
+    private static void verifyAccessibleTextSizing() {
+        check(MeteoBettiUltimateOS.normalizeUiFontScale(1.0f) == 1.0f
+                        && MeteoBettiUltimateOS.normalizeUiFontScale(1.15f) == 1.15f
+                        && MeteoBettiUltimateOS.normalizeUiFontScale(1.3f) == 1.3f,
+                "La dimensione accessibile del testo deve supportare tre livelli");
+        check(MeteoBettiUltimateOS.normalizeUiFontScale(Float.NaN) == 1.0f
+                        && MeteoBettiUltimateOS.normalizeUiFontScale(0.5f) == 1.0f
+                        && MeteoBettiUltimateOS.normalizeUiFontScale(2.0f) == 1.3f,
+                "La dimensione del testo deve restare entro limiti sicuri");
+    }
+
+    private static void verifyDailyForecastPopupValues() {
+        check(MeteoBettiUltimateOS.formatDailyForecastMetric(18.5, "%.1f °C")
+                        .equals("18,5 °C")
+                        && MeteoBettiUltimateOS.formatDailyForecastMetric(40, "%.0f%%")
+                        .equals("40%"),
+                "Il riepilogo giornaliero deve formattare temperatura e probabilità con unità corrette");
+        check(MeteoBettiUltimateOS.formatDailyForecastMetric(Double.NaN, "%.1f UV")
+                        .equals("N/D"),
+                "Il popup giornaliero deve indicare come non disponibili i valori mancanti");
     }
 
     private static void verifyFixedRadarRadius() {

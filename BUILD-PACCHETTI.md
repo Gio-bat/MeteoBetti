@@ -5,10 +5,11 @@ Per prepararli serve invece un JDK 25 con `javac`, `jar` e `jpackage` disponibil
 I pacchetti e la finestra dell'app usano l'icona fornita come `icona.jpg`, già
 preparata nei formati PNG, ICNS e ICO nella cartella `icons`.
 Gli sfondi notturni sono facoltativi: aggiungi nella cartella del progetto
-`sfondo_notte_sole.jpg`, `sfondo_notte_nuvoloso.jpg` e/o
-`sfondo_notte_pioggia.jpg`. L'app li sceglie in base all'ora locale della
-località e alla condizione meteo; se manca il file specifico usa il relativo
-sfondo diurno. Gli script di build includono automaticamente quelli presenti.
+`sfondo_notte_sole.jpg` (è accettato anche `sfondo_notte_sereno.jpg`),
+`sfondo_notte_nuvoloso.jpg` e/o `sfondo_notte_pioggia.jpg`. L'app li sceglie in
+base all'ora locale della località e alla condizione meteo; se manca il file
+specifico usa il relativo sfondo diurno. Gli script di build includono
+automaticamente quelli presenti.
 
 Ogni pacchetto va creato sul sistema operativo di destinazione:
 
@@ -57,13 +58,32 @@ meteo e cartografiche accettano solo HTTPS verso i servizi previsti, non seguono
 redirect e limitano la dimensione delle risposte e delle immagini radar.
 Il nome scelto viene salvato nelle preferenze locali del sistema.
 Nel menu **Opzioni** si può scegliere tra tema scuro e tema chiaro; la scelta
-viene salvata nelle preferenze locali. Le caselle delle previsioni orarie
-mantengono una larghezza stabile anche quando restano poche ore disponibili.
+viene salvata nelle preferenze locali. I pulsanti **A-** e **A+** regolano e
+salvano la dimensione del testo; **Comando/Ctrl+F** porta il cursore alla
+ricerca. La ricerca e i pulsanti mostrano un contorno quando ricevono il focus
+da tastiera. I suggerimenti indicano quando stanno caricando, quando non trovano
+risultati e quando il servizio non è raggiungibile; si possono navigare con le
+frecce, selezionare con Invio o chiudere con Esc. La tendina ha un fondo opaco
+e un bordo arrotondato ad alto contrasto. Anche i menu a discesa usano un solo
+bordo arrotondato e non lasciano trasparire angoli rettangolari scuri. La
+mappa radar e i popup hanno gli angoli smussati; i popup hanno un pulsante
+**Chiudi** leggibile e raggiungibile da tastiera. Le pagine scorrono
+verticalmente anche nelle finestre più basse. La fonte meteo mostra l'ora
+dell'ultimo aggiornamento riuscito. Il pannello allerte mantiene visibile la
+regione, segnala quando sta verificando una nuova località e distingue
+l'assenza di avvisi da un errore del feed.
+Le caselle delle previsioni orarie mantengono una larghezza stabile anche
+quando restano poche ore disponibili.
 La mappa radar resta centrata sulla località cercata, con raggio fisso di 100 km;
 non si sposta con il mouse o con la rotella. Il livello di zoom delle tessere è
 limitato a quello supportato dal radar per evitare avvisi sovrapposti; i bordi
 delle tessere adiacenti vengono sovrapposti leggermente per evitare righe vuote.
 Una nuova ricerca torna alla dashboard e seleziona il primo giorno disponibile.
+Facendo clic sul riquadro meteo attuale si apre il popup con condizioni e
+indicatori della località. Facendo clic su un giorno si apre normalmente la
+pagina con grafici e previsioni orarie; in quella pagina il riquadro con la
+località apre un popup con temperatura media, probabilità massima di pioggia,
+vento medio e UV massimo del giorno selezionato.
 La schermata meteo mostra la fonte usata. Se Open-Meteo restituisce valori
 mancanti per temperatura, umidità, pressione, vento, condizioni o UV, l'app
 prova a integrare solo quei valori con MET Norway, senza sovrascrivere i dati
